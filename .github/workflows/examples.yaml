@@ -37,6 +37,9 @@ jobs:
           tar xf microkit-sdk-${{ env.MICROKIT_VERSION }}-linux-x86-64.tar.gz
       - name: Install dependencies (via apt)
         run: sudo apt update && sudo apt install -y make llvm lld imagemagick device-tree-compiler
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - name: Install Zig
         uses: mlugg/setup-zig@v2.0.5
         with:
