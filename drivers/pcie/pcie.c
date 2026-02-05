@@ -125,7 +125,7 @@ void configure_irqs(struct pci_config_space *pci_header, config_request_t config
 
 void pci_bus_scan(uintptr_t bus_base)
 {
-    uint8_t pci_bus = (((uintptr_t)bus_base >> 20) & 0xff);
+    /* uint8_t pci_bus = (((uintptr_t)bus_base >> 20) & 0xff); */
     for (uint8_t pci_dev = 0; pci_dev < 32; pci_dev++) {
         for (uint8_t pci_func = 0; pci_func < 8; pci_func++) {
             struct pci_config_space *pci_header = (struct pci_config_space *)(bus_base + (pci_dev << 15) + (pci_func << 12));
@@ -145,7 +145,7 @@ void pci_bus_scan(uintptr_t bus_base)
 
                 for (int i = 0; i < pci_ecam_config.num_requests; i++) {
                     config_request_t config_request = pci_ecam_config.requests[i];
-                    if (config_request.bus == pci_bus && config_request.dev == pci_dev && config_request.func == pci_func) {
+                    if (config_request.vendor_id == pci_header->vendor_id && config_request.device_id == pci_header->device_id) {
                         sddf_dprintf("bus: 0x%x, dev: 0x%x, func: 0x%x\n", config_request.bus, config_request.dev, config_request.func);
                         sddf_dprintf("device_id: 0x%x, vendor_id: 0x%x\n", config_request.device_id, config_request.vendor_id);
                         sddf_dprintf("interrupt_line: 0x%x\n", pci_header->interrupt_line);

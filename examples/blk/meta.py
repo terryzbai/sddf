@@ -79,7 +79,7 @@ def generate(
                           mmio_size=board.pci.mmio_size,
                           ioport_paddr=board.pci.ioport_paddr,
                           ioport_size=board.pci.ioport_size)
-    pci_system.add_client(blk_system, device_id=0x1001, vendor_id=0x1af4, bus=0, dev=3, func=0)
+    pci_system.add_client(blk_system, device_id=0x1001, vendor_id=0x1af4, bus=0, dev=0, func=0)
 
     pds = [serial_driver, serial_virt_tx, blk_driver, blk_virt, client, pcie_driver]
     if need_timer:

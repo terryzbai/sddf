@@ -110,6 +110,7 @@ endif
 	$(OBJCOPY) --update-section .ecam_configs=pcie_driver_client_configs.data pcie_driver.elf
 	touch $@
 
+SPEC = $(BUILD_DIR)/capdl_spec.json
 $(IMAGE_FILE) $(REPORT_FILE): $(IMAGES) $(SYSTEM_FILE)
 	$(MICROKIT_TOOL) $(SYSTEM_FILE) --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
 
