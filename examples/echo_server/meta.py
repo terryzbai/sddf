@@ -278,9 +278,9 @@ def generate(
         pci_config_data_port = SystemDescription.IoPort(0xCFC, 4, 2)
         ethernet_driver.add_ioport(pci_config_data_port)
 
-    if board.name == "makatea":
+    if board.name == "vb105":
         ecam_mr = MemoryRegion(
-            sdf, name="ecam", size=0x200000, paddr=0x86500000
+            sdf, name="ecam", size=0x200000, paddr=0xe01000000
         )
         sdf.add_mr(ecam_mr)
         ethernet_driver.add_map(Map(ecam_mr, vaddr=0x3000000, perms="rw"))
