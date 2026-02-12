@@ -17,6 +17,10 @@
             {
                 "name": "device_tx_ring",
                 "size": 32768
+            },
+            {
+                "name": "mbox_message",
+                "size": 4096
             }
         ],
         "irqs": [

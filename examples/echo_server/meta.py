@@ -254,6 +254,13 @@ def generate(
         sdf.add_mr(clock_controller)
         ethernet_driver.add_map(Map(clock_controller, 0x3000000, perms="rw"))
 
+    if board.name == "rpi4b_1gb":
+        mbox = MemoryRegion(
+            sdf, "mbox", 0x10_000, paddr=0xfe00b000
+        )
+        sdf.add_mr(mbox)
+        ethernet_driver.add_map(Map(mbox, 0x3000000, perms="rw", cached=False))
+
     if board.arch == SystemDescription.Arch.X86_64:
         hw_net_rings = SystemDescription.MemoryRegion(
             sdf, "hw_net_rings", 65536, paddr=0x7A000000
