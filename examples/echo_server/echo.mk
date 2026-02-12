@@ -16,7 +16,8 @@ SUPPORTED_BOARDS := odroidc4 odroidc2 maaxboard \
 				imx8mq_evk imx8mp_evk \
 				imx8mp_iotgate \
 				star64 qemu_virt_riscv64 \
-				x86_64_generic
+				x86_64_generic \
+				rpi4b_1gb
 TOOLCHAIN ?= clang
 MICROKIT_CONFIG ?= debug
 SYSTEM_FILE := echo_server.system
@@ -65,7 +66,7 @@ CFLAGS += \
 CFLAGS += -Wno-tautological-constant-out-of-range-compare
 
 LDFLAGS := -L$(BOARD_DIR)/lib
-LIBS := --start-group -lmicrokit -Tmicrokit.ld libsddf_util_debug.a \
+LIBS := --start-group -lmicrokit -Tmicrokit.ld libsddf_util.a libsddf_util_debug.a \
 	--end-group
 
 ECHO_OBJS := echo.o utilization_socket.o \
@@ -105,6 +106,7 @@ endif
 	$(OBJCOPY) --update-section .timer_client_config=timer_client_client0.data echo0.elf
 	$(OBJCOPY) --update-section .net_client_config=net_client_client0.data echo0.elf
 	$(OBJCOPY) --update-section .serial_client_config=serial_client_client0.data echo0.elf
+	$(OBJCOPY) --update-section .serial_client_config=serial_client_ethernet_driver.data eth_driver.elf
 	$(OBJCOPY) --update-section .timer_client_config=timer_client_client1.data echo1.elf
 	$(OBJCOPY) --update-section .net_client_config=net_client_client1.data echo1.elf
 	$(OBJCOPY) --update-section .serial_client_config=serial_client_client1.data echo1.elf
