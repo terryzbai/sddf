@@ -89,16 +89,12 @@
 #define DMA_TX_DO_CSUM               (0x0010)
 #define DMA_TX_QTAG_SHIFT            (7)
 
-#define DMA_FC_THRESH_HI             (RX_DESCS >> 4)
-#define DMA_FC_THRESH_LO             (5)
-#define DMA_FC_THRESH_VALUE          ((DMA_FC_THRESH_LO << 16) |    \
-                                      DMA_FC_THRESH_HI)
-
 #define NUM_DESCS                    256
 #define DESC_SIZE                    12
 #define RX_BUF_LENGTH                2048
 #define DMA_BUFLEN_SHIFT             16
 #define DEFAULT_Q                    0x10
+#define RING_INDEX_CAPACITY          0x10000
 
 #define  BCM54213PE_MII_CONTROL                 (0x00)
 #define  BCM54213PE_MII_STATUS                  (0x01)
@@ -161,6 +157,7 @@ struct genet_dma_ring_rx {
     uint32_t mbuf_done_thresh;        // 0x24
     uint32_t xon_xoff_thresh;         // 0x28
     uint32_t read_prt;                // 0x2C
+    uint8_t unused4[16];              // 0x30-0x40
 };
 
 struct genet_dma_ring_tx {
@@ -176,16 +173,17 @@ struct genet_dma_ring_tx {
     uint32_t mbuf_done_thresh;        // 0x24
     uint32_t flow_period;             // 0x28
     uint32_t write_ptr;               // 0x2C
+    uint8_t unused4[16];              // 0x30-0x40
 };
 
 struct genet_dma {
-    struct genet_dma_desc descs[NUM_DESCS]; // 0x000
-    uint32_t ring_base;                     // 0xC00
-    uint32_t unused1[271];                  // 0xC04-0x1040
-    uint32_t ring_cfg;                      // 0x1040
-    uint32_t ctrl;                          // 0x1044
-    uint32_t unused2;                       // 0x1048
-    uint32_t burst_size;                    // 0x104C
+    struct genet_dma_desc descs[NUM_DESCS];               // 0x000
+    struct genet_dma_ring_rx default_rings[DEFAULT_Q];    // 0xC00-0x1000
+    struct genet_dma_ring_rx ring;                        // 0x1000-0x1040
+    uint32_t ring_cfg;                                    // 0x1040
+    uint32_t ctrl;                                        // 0x1044
+    uint32_t unused2;                                     // 0x1048
+    uint32_t burst_size;                                  // 0x104C
 };
 
 struct genet_regs {
@@ -200,7 +198,7 @@ struct genet_regs {
     uint32_t ext_unused2[3];         // 0x90-0x9C
     uint32_t ext_gphy_ctrl;          // 0x9C
     uint32_t ext_unused3[88];        // 0xA0-0x200
-    uint32_t intrl2_cpu_start;       // 0x200
+    uint32_t intrl2_cpu_stat;        // 0x200
     uint32_t intrl2_unused1;         // 0x204-0x208
     uint32_t intrl2_cpu_clear;       // 0x208
     uint32_t intrl2_cpu_stat_mask;   // 0x20C
