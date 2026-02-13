@@ -195,7 +195,7 @@ def generate(
         assert timer_node is not None
 
     timer_driver = ProtectionDomain(
-        "timer_driver", "timer_driver.elf", priority=101, cpu=get_core("timer_driver")
+        "timer_driver", "timer_driver.elf", priority=102, cpu=get_core("timer_driver")
     )
     timer_system = Sddf.Timer(sdf, timer_node, timer_driver)
 
@@ -332,6 +332,7 @@ def generate(
     serial_system.add_client(ethernet_driver)
     timer_system.add_client(client0)
     timer_system.add_client(client1)
+    timer_system.add_client(ethernet_driver)
     net_system.add_client_with_copier(client0, client0_net_copier)
     net_system.add_client_with_copier(client1, client1_net_copier)
 

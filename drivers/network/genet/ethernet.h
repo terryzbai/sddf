@@ -28,6 +28,78 @@
 #define MDIO_REG_SHIFT              (16)
 #define MDIO_REG_MASK               (0x1f)
 
+#define CMD_TX_EN                   BIT(0)
+#define CMD_RX_EN                   BIT(1)
+#define UMAC_SPEED_10               (0)
+#define UMAC_SPEED_100              (1)
+#define UMAC_SPEED_1000             (2)
+#define UMAC_SPEED_2500             (3)
+#define CMD_SPEED_SHIFT             (2)
+#define CMD_SPEED_MASK              (3)
+#define CMD_SW_RESET                BIT(13)
+#define CMD_LCL_LOOP_EN             BIT(15)
+#define CMD_TX_EN                   BIT(0)
+#define CMD_RX_EN                   BIT(1)
+
+#define  GENET_IRQ_TXDMA_DONE           BIT(16)
+#define  GENET_IRQ_RXDMA_DONE           BIT(13)
+
+#define RGMII_LINK                  BIT(4)
+#define RGMII_MODE_EN               BIT(6)
+#define ID_MODE_DIS                 BIT(16)
+
+#define MIB_RESET_RX                BIT(0)
+#define MIB_RESET_RUNT              BIT(1)
+#define MIB_RESET_TX                BIT(2)
+
+#define ETH_DATA_LEN                (1500)
+#define ETH_HLEN                    (14)
+#define VLAN_HLEN                   (4)
+#define ETH_FCS_LEN                 (4)
+/* Body(1500) + EH_SIZE(14) + VLANTAG(4) + BRCMTAG(6) + FCS(4) = 1528.
+ * 1536 is multiple of 256 bytes
+ */
+#define ENET_BRCM_TAG_LEN           (6)
+#define ENET_PAD                    (8)
+#define ENET_MAX_MTU_SIZE        (ETH_DATA_LEN + ETH_HLEN +     \
+                                  VLAN_HLEN + ENET_BRCM_TAG_LEN +   \
+                                  ETH_FCS_LEN + ENET_PAD)
+
+#define GENET_RBUF_OFF              (0x0300)
+#define RBUF_TBUF_SIZE_CTRL         (GENET_RBUF_OFF + 0xb4)
+#define RBUF_CTRL                   (GENET_RBUF_OFF + 0x00)
+#define RBUF_ALIGN_2B               BIT(1)
+
+/* Tx/Rx Dma Descriptor common bits */
+#define DMA_EN                       BIT(0)
+#define DMA_RING_BUF_EN_SHIFT        (0x01)
+#define DMA_RING_BUF_EN_MASK         (0xffff)
+#define DMA_BUFLENGTH_MASK           (0x0fff)
+#define DMA_BUFLENGTH_SHIFT          (16)
+#define DMA_RING_SIZE_SHIFT          (16)
+#define DMA_OWN                      (0x8000)
+#define DMA_EOP                      (0x4000)
+#define DMA_SOP                      (0x2000)
+#define DMA_WRAP                     (0x1000)
+#define DMA_MAX_BURST_LENGTH         (0x8)
+/* Tx specific DMA descriptor bits */
+#define DMA_TX_UNDERRUN              (0x0200)
+#define DMA_TX_APPEND_CRC            (0x0040)
+#define DMA_TX_OW_CRC                (0x0020)
+#define DMA_TX_DO_CSUM               (0x0010)
+#define DMA_TX_QTAG_SHIFT            (7)
+
+#define DMA_FC_THRESH_HI             (RX_DESCS >> 4)
+#define DMA_FC_THRESH_LO             (5)
+#define DMA_FC_THRESH_VALUE          ((DMA_FC_THRESH_LO << 16) |    \
+                                      DMA_FC_THRESH_HI)
+
+#define NUM_DESCS                    256
+#define DESC_SIZE                    12
+#define RX_BUF_LENGTH                2048
+#define DMA_BUFLEN_SHIFT             16
+#define DEFAULT_Q                    0x10
+
 #define  BCM54213PE_MII_CONTROL                 (0x00)
 #define  BCM54213PE_MII_STATUS                  (0x01)
 #define  BCM54213PE_PHY_IDENTIFIER_HIGH         (0x02)
@@ -56,18 +128,65 @@
 #define BCM54213PE_VERSION_X                    (0x600d84a0)
 
 //BCM54213PE_MII_CONTROL
-#define MII_CONTROL_PHY_RESET                   (1 << 15)
-#define MII_CONTROL_AUTO_NEGOTIATION_ENABLED    (1 << 12)
-#define MII_CONTROL_AUTO_NEGOTIATION_RESTART    (1 << 9)
-#define MII_CONTROL_PHY_FULL_DUPLEX             (1 << 8)
-#define MII_CONTROL_SPEED_SELECTION             (1 << 6)
+#define MII_CONTROL_PHY_RESET                   BIT(15)
+#define MII_CONTROL_AUTO_NEGOTIATION_ENABLED    BIT(12)
+#define MII_CONTROL_AUTO_NEGOTIATION_RESTART    BIT(9)
+#define MII_CONTROL_PHY_FULL_DUPLEX             BIT(8)
+#define MII_CONTROL_SPEED_SELECTION             BIT(6)
 
 //BCM54213PE_MII_STATUS
-#define MII_STATUS_LINK_UP                      (1 << 2)
+#define MII_STATUS_LINK_UP                      BIT(2)
+#define MII_STATUS_AUTO_NEGOTIATION_COMPLETE    BIT(5)
 
 //BCM54213PE_CONTROL
-#define CONTROL_FULL_DUPLEX_CAPABILITY          (1 << 9)
-#define CONTROL_HALF_DUPLEX_CAPABILITY          (1 << 8)
+#define CONTROL_FULL_DUPLEX_CAPABILITY          BIT(9)
+#define CONTROL_HALF_DUPLEX_CAPABILITY          BIT(8)
+
+struct genet_dma_desc {
+    uint32_t status;
+    uint32_t addr_lo;
+    uint32_t addr_hi;
+};
+
+struct genet_dma_ring_rx {
+    uint32_t write_ptr;               // 0x00
+    uint32_t unused1;                 // 0x04
+    uint32_t prod_index;              // 0x08
+    uint32_t cons_index;              // 0x0C
+    uint32_t buf_size;                // 0x10
+    uint32_t start_addr;              // 0x14
+    uint32_t unused2;                 // 0x18
+    uint32_t end_addr;                // 0x1C
+    uint32_t unused3;                 // 0x20
+    uint32_t mbuf_done_thresh;        // 0x24
+    uint32_t xon_xoff_thresh;         // 0x28
+    uint32_t read_prt;                // 0x2C
+};
+
+struct genet_dma_ring_tx {
+    uint32_t read_ptr;                // 0x00
+    uint32_t unused1;                 // 0x04
+    uint32_t cons_index;              // 0x08
+    uint32_t prod_index;              // 0x0C
+    uint32_t buf_size;                // 0x10
+    uint32_t start_addr;              // 0x14
+    uint32_t unused2;                 // 0x18
+    uint32_t end_addr;                // 0x1C
+    uint32_t unused3;                 // 0x20
+    uint32_t mbuf_done_thresh;        // 0x24
+    uint32_t flow_period;             // 0x28
+    uint32_t write_ptr;               // 0x2C
+};
+
+struct genet_dma {
+    struct genet_dma_desc descs[NUM_DESCS]; // 0x000
+    uint32_t ring_base;                     // 0xC00
+    uint32_t unused1[271];                  // 0xC04-0x1040
+    uint32_t ring_cfg;                      // 0x1040
+    uint32_t ctrl;                          // 0x1044
+    uint32_t unused2;                       // 0x1048
+    uint32_t burst_size;                    // 0x104C
+};
 
 struct genet_regs {
     uint32_t sys_rev_ctrl;           // 0x00
@@ -103,7 +222,12 @@ struct genet_regs {
     uint32_t umac_mib_ctrl;          // 0xD80
     uint32_t umac_unused4[36];       // 0xD80-0xE14
     uint32_t umac_mdio_cmd;          // 0xE14
+    uint32_t unused1[1146];          // 0xE18-0x2000
+    struct genet_dma dma_rx;         // 0x2000-0x304C
+    uint32_t unused2[1004];          // 0x3050-0x4000
+    struct genet_dma dma_tx;         // 0x4000
 };
+
 #define MBOX_REQUEST    0
 #define MBOX_TAG_HARDWARE_GET_MAC_ADDRESS  0x00010003
 #define MBOX_TAG_LAST           0

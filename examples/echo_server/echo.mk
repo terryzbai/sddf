@@ -112,6 +112,7 @@ endif
 	$(OBJCOPY) --update-section .serial_client_config=serial_client_client1.data echo1.elf
 	$(OBJCOPY) --update-section .lib_sddf_lwip_config=lib_sddf_lwip_config_client0.data echo0.elf
 	$(OBJCOPY) --update-section .lib_sddf_lwip_config=lib_sddf_lwip_config_client1.data echo1.elf
+	$(OBJCOPY) --update-section .timer_client_config=timer_client_ethernet_driver.data eth_driver.elf
 	touch $@
 
 ${IMAGE_FILE} $(REPORT_FILE): $(IMAGES) $(SYSTEM_FILE)

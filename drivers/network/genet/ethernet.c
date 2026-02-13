@@ -21,6 +21,8 @@
 #include <sddf/util/util.h>
 #include <sddf/util/fence.h>
 #include <sddf/util/printf.h>
+#include <sddf/timer/config.h>
+#include <sddf/timer/client.h>
 
 #include <sddf/serial/queue.h> // TODO: remove
 #include <sddf/serial/config.h>
@@ -32,10 +34,18 @@ serial_queue_handle_t serial_tx_queue_handle;
 __attribute__((__section__(".device_resources"))) device_resources_t device_resources;
 __attribute__((__section__(".net_driver_config"))) net_driver_config_t config;
 __attribute__((__section__(".serial_client_config"))) serial_client_config_t serial_config;
+__attribute__((__section__(".timer_client_config"))) timer_client_config_t timer_config;
 
 volatile struct genet_regs *dev_regs;
 volatile struct mbox_regs *mbox_regs;
 volatile uint32_t *mbox;
+
+struct genet_dma_ring_rx *ring_rx;
+struct genet_dma_ring_tx *ring_tx;
+
+uint32_t tx_index = 0;
+uint32_t rx_index = 0;
+uint32_t index_flag = 0;
 
 static void bcmgenet_mdio_write(uint8_t reg_addr, uint16_t val)
 {
@@ -60,8 +70,33 @@ static uint16_t bcmgenet_mdio_read(uint8_t reg_addr)
     // TODO: proper way
     while (dev_regs->umac_mdio_cmd & MDIO_START_BUSY);
 
-    sddf_dprintf("reg: 0x%x\n", dev_regs->umac_mdio_cmd);
     return dev_regs->umac_mdio_cmd & 0xFFFF;
+}
+
+static void sleep_us(uint32_t us)
+{
+    uint64_t start = sddf_timer_time_now(timer_config.driver_id);
+    while ((sddf_timer_time_now(timer_config.driver_id) - start) < us);
+}
+
+
+static void rx_return(void)
+{
+    uint32_t prod_index = ring_rx->prod_index;
+    sddf_dprintf("Rx prod_index: %d\n", prod_index);
+    sddf_dprintf("Rx cons_index: %d\n", ring_rx->cons_index);
+    sddf_dprintf("Tx prod_index: %d\n", ring_tx->prod_index);
+    sddf_dprintf("Tx cons_index: %d\n", ring_tx->cons_index);
+
+    sddf_dprintf("desc[0] status: 0x%x\n", dev_regs->dma_rx.descs[0].status);
+    sddf_dprintf("desc[0] addr_lo: 0x%x\n", dev_regs->dma_rx.descs[0].addr_lo);
+    sddf_dprintf("desc[0] addr_hi: 0x%x\n", dev_regs->dma_rx.descs[0].addr_hi);
+}
+
+
+static void handle_irq(void)
+{
+    rx_return();
 }
 
 static void eth_setup(void)
@@ -117,6 +152,8 @@ static void eth_setup(void)
 
     // set mii control
     bcmgenet_mdio_write(BCM54213PE_MII_CONTROL, (MII_CONTROL_AUTO_NEGOTIATION_ENABLED | MII_CONTROL_AUTO_NEGOTIATION_RESTART | MII_CONTROL_PHY_FULL_DUPLEX | MII_CONTROL_SPEED_SELECTION));
+
+    while (~bcmgenet_mdio_read(BCM54213PE_MII_STATUS) & MII_STATUS_AUTO_NEGOTIATION_COMPLETE);
     sddf_dprintf("finished MDIO init\n");
 
     // ========== Set MAC address ==========
@@ -156,25 +193,111 @@ static void eth_setup(void)
     dev_regs->umac_mac0 = mac[0] << 24 | mac[1] << 16 | mac[2] << 8 | mac[3];
     dev_regs->umac_mac1 = mac[4] << 8 | mac[5];
 
-    // TODO: link up
+    sddf_dprintf("mii_contrl: 0x%x\n", bcmgenet_mdio_read(BCM54213PE_MII_CONTROL));
+    sddf_dprintf("mii_status: 0x%x\n", bcmgenet_mdio_read(BCM54213PE_MII_STATUS));
 
     // ========== Check Link Speed ==========
     uint32_t link_status = bcmgenet_mdio_read(BCM54213PE_STATUS);
-    sddf_dprintf("mii_status: 0x%lx\n", link_status);
+    sddf_dprintf("status: 0x%x\n", link_status);
     if ((link_status & BIT(10)) | (link_status & BIT(11))) {
         sddf_dprintf("Support link mode speed 1000M\n");
     }
 
-
     // ========== UMAC Reset ==========
+    sddf_dprintf("rbug_ctrl: 0x%x\n", dev_regs->sys_rbuf_flush_ctrl);
+    dev_regs->sys_rbuf_flush_ctrl |= BIT(1);
+    dev_regs->sys_rbuf_flush_ctrl &= ~BIT(1);
+    sleep_us(10);
 
+    dev_regs->sys_rbuf_flush_ctrl = 0;
+    sleep_us(10);
+
+    dev_regs->umac_cmd = 0;
+    dev_regs->umac_cmd = CMD_SW_RESET | CMD_LCL_LOOP_EN;
+    sleep_us(2);
+
+    dev_regs->umac_cmd = 0;
+    dev_regs->umac_mib_ctrl = MIB_RESET_RX | MIB_RESET_TX | MIB_RESET_RUNT;
+    dev_regs->umac_mib_ctrl = 0;
+    dev_regs->umac_max_frame_len = ENET_MAX_MTU_SIZE;
+
+    dev_regs->rbuf_ctrl |= RBUF_ALIGN_2B;
+    dev_regs->rbuf_tbuf_size_ctrl = 1;
+    sddf_dprintf("UMAC reset finished\n");
 
     // ========== Disable DMA ==========
+    dev_regs->dma_tx.ctrl &= ~BIT(DMA_EN);
+    dev_regs->dma_rx.ctrl &= ~BIT(DMA_EN);
+    dev_regs->umac_tx_flush = 1;
+    sleep_us(100);
+    dev_regs->umac_tx_flush = 0;
+
     // ========== Rx Ring Init ==========
-    // ========== Rx Desc Init ==========
+    sddf_dprintf("dma_rx: 0x%lx\n", &dev_regs->dma_rx);
+    ring_rx = (struct genet_dma_ring_rx *)&dev_regs->dma_rx.ring_base;
+    dev_regs->dma_rx.burst_size = DMA_MAX_BURST_LENGTH;
+    ring_rx->start_addr = 0;
+    ring_rx->read_prt = 0;
+    ring_rx->write_ptr = 0;
+    ring_rx->end_addr = NUM_DESCS * DESC_SIZE / 4 - 1;
+    ring_rx->prod_index = 0;
+    ring_rx->cons_index = 0;
+    ring_rx->buf_size = (NUM_DESCS << 16) | RX_BUF_LENGTH;
+    ring_rx->xon_xoff_thresh = (NUM_DESCS >> 4) | (5 << 16);
+    dev_regs->dma_rx.ring_cfg = BIT(DEFAULT_Q);
+
+    // ========== Rx Descs Init ==========
+    uintptr_t rx_buf_ptr = (uintptr_t)device_resources.regions[1].region.vaddr;
+    sddf_dprintf("rx_buf_prt: 0x%lx\n", rx_buf_ptr);
+    for (int i = 0; i < NUM_DESCS; i++) {
+        dev_regs->dma_rx.descs[i].addr_lo = (rx_buf_ptr + i * RX_BUF_LENGTH) & 0xFFFFFFFF;
+        dev_regs->dma_rx.descs[i].addr_hi = (rx_buf_ptr + i * RX_BUF_LENGTH) >> 32;
+        dev_regs->dma_rx.descs[i].status = (RX_BUF_LENGTH << DMA_BUFLEN_SHIFT) | DMA_OWN;
+    }
+
     // ========== Tx Ring Init ==========
+    sddf_dprintf("dma_tx: 0x%lx\n", &dev_regs->dma_tx);
+    ring_tx = (struct genet_dma_ring_tx *)&dev_regs->dma_tx.ring_base;
+    dev_regs->dma_tx.burst_size = DMA_MAX_BURST_LENGTH;
+    ring_tx->start_addr = 0;
+    // TODO: why set read_ptr multiple times in rt-thread?
+    ring_tx->read_ptr = 0;
+    ring_tx->write_ptr = 0;
+    ring_tx->end_addr = NUM_DESCS * DESC_SIZE / 4 - 1;
+    ring_tx->prod_index = 0;
+    ring_tx->cons_index = 0;
+    ring_tx->mbuf_done_thresh = 0x1;
+    ring_tx->flow_period = 0;
+    ring_tx->buf_size = (NUM_DESCS << 16) | RX_BUF_LENGTH;
+
     // ========== Enable DMA ==========
+    uint32_t dma_ctrl = (1 << (DEFAULT_Q + DMA_RING_BUF_EN_SHIFT)) | DMA_EN;
+    dev_regs->dma_tx.ctrl = dma_ctrl;
+    dev_regs->dma_rx.ctrl |= dma_ctrl;
+
     // ========== Adjust Link ==========
+    uint32_t oob_ctrl = dev_regs->ext_rgmii_oob_ctrl | RGMII_LINK | RGMII_MODE_EN | ID_MODE_DIS;
+    dev_regs->ext_rgmii_oob_ctrl = oob_ctrl;
+    sleep_us(1000);
+    dev_regs->umac_cmd = UMAC_SPEED_1000 << CMD_SPEED_SHIFT;
+
+    // ========== Index Reset ==========
+    sddf_dprintf("Tx cons_index: 0x%x\n", ring_tx->cons_index);
+    while (ring_tx->cons_index != 0);
+    tx_index = ring_tx->cons_index;
+    ring_tx->prod_index = tx_index;
+
+    index_flag = ring_rx->prod_index;
+    rx_index = index_flag % NUM_DESCS;
+    ring_rx->cons_index = index_flag;
+    ring_rx->prod_index = index_flag;
+
+    // ========== Enable Rx/Tx ==========
+    dev_regs->umac_cmd |= (CMD_TX_EN | CMD_RX_EN);
+
+    // ========== Enable IRQ ==========
+    dev_regs->intrl2_cpu_clear_mask = GENET_IRQ_RXDMA_DONE;
+    sddf_dprintf("Ready\n");
 }
 
 void init(void)
@@ -193,4 +316,8 @@ void init(void)
 void notified(sddf_channel ch)
 {
     sddf_printf("notified by ch %d\n", ch);
+    if (ch == device_resources.irqs[0].id) {
+        handle_irq();
+        sddf_deferred_irq_ack(ch);
+    }
 }
