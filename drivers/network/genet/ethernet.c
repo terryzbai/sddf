@@ -168,7 +168,7 @@ static void rx_return(void)
 
         uint64_t addr = ((uint64_t)(d->addr_hi) << 32) | d->addr_lo;
         net_buff_desc_t buffer = { addr , d->status >> DMA_BUFLEN_SHIFT };
-        sddf_dprintf("recv buf[%d] - addr: 0x%lx, len: 0x%x\n", idx, buffer.io_or_offset, buffer.len);
+        sddf_dprintf("recv buf[%d] - addr: 0x%lx, len: %d\n", idx, buffer.io_or_offset, buffer.len);
         int err = net_enqueue_active(&rx_queue, buffer);
         assert(!err);
 
@@ -193,18 +193,23 @@ static void tx_provide()
             assert(!err);
 
             uint32_t idx = tx.tail % tx.capacity;
-            uint16_t stat = (0x3F << DMA_TX_QTAG_SHIFT) | DMA_TX_APPEND_CRC | DMA_SOP | DMA_EOP;
+            uint32_t stat = (buffer.len << DMA_BUFLENGTH_SHIFT) | (0x3F << DMA_TX_QTAG_SHIFT) | DMA_TX_APPEND_CRC | DMA_SOP | DMA_EOP;
+            sddf_dprintf("addr: 0x%lx, len: %d, stat: 0x%x\n", buffer.io_or_offset, buffer.len, stat);
             update_ring_slot(&tx, idx, buffer.io_or_offset, stat);
             tx.tail++;
             ring_tx->prod_index = tx.tail % tx.max_index;
+            ring_tx->write_ptr = buffer.len;
+
+            sddf_dprintf("cons_index: 0x%x, prod_index: 0x%x\n", ring_tx->cons_index, ring_tx->prod_index);
+            sddf_dprintf("read_ptr: 0x%x, write_ptr: 0x%x\n", ring_tx->read_ptr, ring_tx->write_ptr);
         }
 
         net_request_signal_active(&tx_queue);
         reprocess = false;
 
         if (!hw_ring_full(&tx) && !net_queue_empty_active(&tx_queue)) {
-            net_cancel_signal_active(&tx_queue);
-            reprocess = true;
+          net_cancel_signal_active(&tx_queue);
+          reprocess = true;
         }
     }
 }
@@ -222,6 +227,7 @@ static void tx_return(void)
 
         THREAD_MEMORY_ACQUIRE();
 
+        sddf_dprintf("tx\n");
         uint64_t addr = ((uint64_t)(d->addr_hi) << 32) | d->addr_lo;
         net_buff_desc_t buffer = { addr, 0 };
         int err = net_enqueue_free(&tx_queue, buffer);
@@ -241,7 +247,10 @@ static void handle_irq(void)
 {
     uint32_t irq_status = eth->intrl2_cpu_stat & ~(eth->intrl2_cpu_stat_mask);
     while (irq_status) {
+        sddf_dprintf("irq status: 0x%x\n", irq_status);
         if (irq_status & GENET_IRQ_TXDMA_DONE) {
+            sddf_dprintf("cons_index: 0x%x, prod_index: 0x%x\n", ring_tx->cons_index, ring_tx->prod_index);
+            sddf_dprintf("read_ptr: 0x%x, write_ptr: 0x%x\n", ring_tx->read_ptr, ring_tx->write_ptr);
             tx_return();
             tx_provide();
         }
@@ -263,7 +272,7 @@ static void eth_setup(void)
 
     uint8_t version_major = (eth->sys_rev_ctrl >> 24) & 0x0f;
     if (version_major != 6) {
-        sddf_printf("Unsupported GENET version\n");
+      sddf_printf("Unsupported GENET version\n");
     }
     sddf_printf("GENET HW version: %d\n", version_major);
 
@@ -283,8 +292,8 @@ static void eth_setup(void)
     uint32_t uid_high = bcmgenet_mdio_read(BCM54213PE_PHY_IDENTIFIER_HIGH);
     uint32_t uid_low = bcmgenet_mdio_read(BCM54213PE_PHY_IDENTIFIER_LOW);
     if (((uid_high << 16) | (uid_low & 0xFFFF)) == 0) {
-        sddf_dprintf("ERROR: invalid ethernet UID '0'\n");
-        return;
+      sddf_dprintf("ERROR: invalid ethernet UID '0'\n");
+      return;
     }
 
     // reset phy
@@ -331,18 +340,18 @@ static void eth_setup(void)
     mbox_regs->write = r;
     // wait for the response
     while(1)
-    {
+      {
         // check if response is ready
         while (mbox_regs->status & MBOX_EMPTY);
         // check if response is for us
         if (r == mbox_regs->read) {
-            if (mbox[1] != MBOX_RESPONSE){
-                sddf_dprintf("ERROR: Invalid mbox response\n");
-                return;
-            }
-            break;
+          if (mbox[1] != MBOX_RESPONSE){
+            sddf_dprintf("ERROR: Invalid mbox response\n");
+            return;
+          }
+          break;
         }
-    }
+      }
     char *mac = (char *)&mbox[5];
     sddf_dprintf("MAC address: %02x:%02x:%02x:%02x:%02x:%02x\n",
                  mac[0], mac[1], mac[2],
@@ -357,7 +366,7 @@ static void eth_setup(void)
     uint32_t link_status = bcmgenet_mdio_read(BCM54213PE_STATUS);
     sddf_dprintf("status: 0x%x\n", link_status);
     if ((link_status & BIT(10)) | (link_status & BIT(11))) {
-        sddf_dprintf("Support link mode speed 1000M\n");
+      sddf_dprintf("Support link mode speed 1000M\n");
     }
 
     // ========== UMAC Reset ==========
@@ -393,7 +402,7 @@ static void eth_setup(void)
     ring_rx = (struct genet_dma_ring_rx *)&eth->dma_rx.ring;
     eth->dma_rx.burst_size = DMA_MAX_BURST_LENGTH;
     ring_rx->start_addr = 0;
-    ring_rx->read_prt = 0;
+    ring_rx->read_ptr = 0;
     ring_rx->write_ptr = 0;
     ring_rx->end_addr = NUM_DESCS * DESC_SIZE / 4 - 1;
     ring_rx->prod_index = 0;
@@ -403,14 +412,14 @@ static void eth_setup(void)
     eth->dma_rx.ring_cfg = BIT(DEFAULT_Q);
 
     // ========== Rx Descs Init ==========
-//    uintptr_t rx_desc_phys = device_resources.regions[2].io_addr;
-//    rx_desc = (struct genet_dma_desc *)&eth->dma_rx.descs;
-//    tx_desc = (struct genet_dma_desc *)&eth->dma_tx.descs;
-//    for (int i = 0; i < NUM_DESCS; i++) {
-//        rx_desc[i].addr_lo = (rx_desc_phys + i * RX_BUF_LENGTH) & 0xFFFFFFFF;
-//        rx_desc[i].addr_hi = (rx_desc_phys + i * RX_BUF_LENGTH) >> 32;
-//        rx_desc[i].status = (RX_BUF_LENGTH << DMA_BUFLEN_SHIFT) | DMA_OWN;
-//    }
+    //    uintptr_t rx_desc_phys = device_resources.regions[2].io_addr;
+    //    rx_desc = (struct genet_dma_desc *)&eth->dma_rx.descs;
+    //    tx_desc = (struct genet_dma_desc *)&eth->dma_tx.descs;
+    //    for (int i = 0; i < NUM_DESCS; i++) {
+    //        rx_desc[i].addr_lo = (rx_desc_phys + i * RX_BUF_LENGTH) & 0xFFFFFFFF;
+    //        rx_desc[i].addr_hi = (rx_desc_phys + i * RX_BUF_LENGTH) >> 32;
+    //        rx_desc[i].status = (RX_BUF_LENGTH << DMA_BUFLEN_SHIFT) | DMA_OWN;
+    //    }
 
     // ========== Tx Ring Init ==========
     sddf_dprintf("dma_tx: 0x%lx\n", &eth->dma_tx);
@@ -420,6 +429,8 @@ static void eth_setup(void)
     ring_tx->start_addr = 0;
     // TODO: why set read_ptr multiple times in rt-thread?
     ring_tx->read_ptr = 0;
+    ring_tx->read_ptr = 0;
+    ring_tx->read_ptr = 0;
     ring_tx->write_ptr = 0;
     ring_tx->end_addr = NUM_DESCS * DESC_SIZE / 4 - 1;
     ring_tx->prod_index = 0;
@@ -427,6 +438,7 @@ static void eth_setup(void)
     ring_tx->mbuf_done_thresh = 0x1;
     ring_tx->flow_period = 0;
     ring_tx->buf_size = (NUM_DESCS << 16) | RX_BUF_LENGTH;
+    eth->dma_tx.ring_cfg = BIT(DEFAULT_Q);
 
     // ========== Enable DMA ==========
     uint32_t dma_ctrl = (1 << (DEFAULT_Q + DMA_RING_BUF_EN_SHIFT)) | DMA_EN;
@@ -449,6 +461,12 @@ static void eth_setup(void)
     tx_index = ring_tx->cons_index;
     ring_tx->prod_index = tx_index;
 
+    tx.head = 0;
+    tx.tail = 0;
+    tx.capacity = NUM_DESCS;
+    tx.max_index = 0x10000;
+    tx.descr = (struct genet_dma_desc *)&eth->dma_tx.descs;
+
     index_flag = ring_rx->prod_index;
     rx_index = index_flag % NUM_DESCS;
     sddf_dprintf("rx_index: 0x%x\n", rx_index);
@@ -464,12 +482,6 @@ static void eth_setup(void)
     rx.capacity = NUM_DESCS;
     rx.max_index = 0x10000;
     rx.descr = (struct genet_dma_desc *)&eth->dma_rx.descs;
-
-    tx.head = 0;
-    tx.tail = 0;
-    tx.capacity = NUM_DESCS;
-    tx.max_index = 0x10000;
-    tx.descr = (struct genet_dma_desc *)&eth->dma_tx.descs;
 
     sddf_dprintf("Rx cons_index: 0x%x\n", ring_rx->cons_index);
     sddf_dprintf("Rx prod_index: 0x%x\n", ring_rx->prod_index);
@@ -504,7 +516,6 @@ void init(void)
 
 void notified(sddf_channel ch)
 {
-    sddf_printf("notified by ch %d\n", ch);
     if (ch == device_resources.irqs[0].id) {
         handle_irq();
 

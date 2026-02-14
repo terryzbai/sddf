@@ -156,7 +156,7 @@ struct genet_dma_ring_rx {
     uint32_t unused3;                 // 0x20
     uint32_t mbuf_done_thresh;        // 0x24
     uint32_t xon_xoff_thresh;         // 0x28
-    uint32_t read_prt;                // 0x2C
+    uint32_t read_ptr;                // 0x2C
     uint8_t unused4[16];              // 0x30-0x40
 };
 
