@@ -18,7 +18,7 @@ ifeq ($(findstring $(strip ${MICROKIT_BOARD}),${SUPPORTED_BOARDS}),)
 endif
 
 ifeq ($(wildcard ${BOARD_DIR}),)
-  $(error ${MICROKIT_BOARD} not supported by ${MICROKIT_SDK})
+  $(error ${MICROKIT_BOARD} not supported by ${MICROKIT_SDK} ${BOARD_DIR})
 endif
 
 ifeq ($(wildcard ${SDDF}/tools/make/board/${MICROKIT_BOARD}.mk),)

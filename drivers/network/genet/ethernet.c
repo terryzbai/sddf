@@ -36,7 +36,7 @@ __attribute__((__section__(".net_driver_config"))) net_driver_config_t config;
 __attribute__((__section__(".serial_client_config"))) serial_client_config_t serial_config;
 __attribute__((__section__(".timer_client_config"))) timer_client_config_t timer_config;
 
-volatile struct genet_regs *dev_regs;
+volatile struct genet_regs *eth;
 volatile struct mbox_regs *mbox_regs;
 volatile uint32_t *mbox;
 
@@ -46,34 +46,73 @@ volatile struct genet_dma_ring_tx *ring_tx;
 volatile struct genet_dma_desc *rx_desc;
 volatile struct genet_dma_desc *tx_desc;
 
+/* HW ring buffer data type */
+typedef struct {
+    uint32_t tail; /* index to insert at */
+    uint32_t head; /* index to remove from */
+    uint32_t capacity; /* capacity of the ring */
+    uint32_t max_index; /* max index of the ring */
+    volatile struct genet_dma_desc *descr; /* buffer descriptor array */
+} hw_ring_t;
+
+hw_ring_t rx;
+hw_ring_t tx;
+
+net_queue_handle_t rx_queue;
+net_queue_handle_t tx_queue;
+
 uint32_t tx_index = 0;
 uint32_t rx_index = 0;
 uint32_t index_flag = 0;
 
+static inline bool hw_ring_full(hw_ring_t *ring)
+{
+    return ring->tail - ring->head == ring->capacity;
+}
+
+static inline bool hw_ring_empty(hw_ring_t *ring)
+{
+    return ring->tail - ring->head == 0;
+}
+
+static void update_ring_slot(hw_ring_t *ring, unsigned int idx, uintptr_t phys,
+                             uint16_t stat)
+{
+    volatile struct genet_dma_desc *d = &(ring->descr[idx]);
+    d->addr_lo = phys & 0xFFFFFFFF;
+    d->addr_hi = phys >> 32;
+
+    /* Ensure all writes to the descriptor complete, before we set the flags
+     * that makes hardware aware of this slot.
+     */
+    THREAD_MEMORY_RELEASE();
+    d->status = stat;
+}
+
 static void bcmgenet_mdio_write(uint8_t reg_addr, uint16_t val)
 {
     uint32_t cmd = MDIO_WR | (GENET_PHY_ID << MDIO_PMD_SHIFT) | ((reg_addr & MDIO_REG_MASK) << MDIO_REG_SHIFT) | val;
-    dev_regs->umac_mdio_cmd = cmd;
+    eth->umac_mdio_cmd = cmd;
 
-    uint32_t reg = dev_regs->umac_mdio_cmd | MDIO_START_BUSY;
-    dev_regs->umac_mdio_cmd = reg;
+    uint32_t reg = eth->umac_mdio_cmd | MDIO_START_BUSY;
+    eth->umac_mdio_cmd = reg;
 
     // TODO: proper way
-    while (dev_regs->umac_mdio_cmd & MDIO_START_BUSY);
+    while (eth->umac_mdio_cmd & MDIO_START_BUSY);
 }
 
 static uint16_t bcmgenet_mdio_read(uint8_t reg_addr)
 {
     uint32_t cmd = MDIO_RD | (GENET_PHY_ID << MDIO_PMD_SHIFT) | ((reg_addr & MDIO_REG_MASK) << MDIO_REG_SHIFT);
-    dev_regs->umac_mdio_cmd = cmd;
+    eth->umac_mdio_cmd = cmd;
 
-    uint32_t reg = dev_regs->umac_mdio_cmd | MDIO_START_BUSY;
-    dev_regs->umac_mdio_cmd = reg;
+    uint32_t reg = eth->umac_mdio_cmd | MDIO_START_BUSY;
+    eth->umac_mdio_cmd = reg;
 
     // TODO: proper way
-    while (dev_regs->umac_mdio_cmd & MDIO_START_BUSY);
+    while (eth->umac_mdio_cmd & MDIO_START_BUSY);
 
-    return dev_regs->umac_mdio_cmd & 0xFFFF;
+    return eth->umac_mdio_cmd & 0xFFFF;
 }
 
 static void sleep_us(uint32_t us)
@@ -82,44 +121,136 @@ static void sleep_us(uint32_t us)
     while ((sddf_timer_time_now(timer_config.driver_id) - start) < us);
 }
 
+static void rx_provide(void)
+{
+    bool reprocess = true;
+    while (reprocess) {
+        while (!hw_ring_full(&rx) && !net_queue_empty_free(&rx_queue)) {
+            net_buff_desc_t buffer;
+            int err = net_dequeue_free(&rx_queue, &buffer);
+            assert(!err);
+
+            uint32_t idx = ring_rx->prod_index % NUM_DESCS;
+            // TODO: BUFLEN
+            uint16_t stat = (128 << DMA_BUFLEN_SHIFT) | DMA_OWN; /* give the DMA access to device */
+            update_ring_slot(&rx, idx, buffer.io_or_offset, stat);
+            rx.tail++;
+        }
+
+        /* Only request a notification from virtualiser if HW ring not full */
+        if (!hw_ring_full(&rx)) {
+            net_request_signal_free(&rx_queue);
+        } else {
+            net_cancel_signal_free(&rx_queue);
+        }
+        reprocess = false;
+
+        if (!net_queue_empty_free(&rx_queue) && !hw_ring_full(&rx)) {
+            net_cancel_signal_free(&rx_queue);
+            reprocess = true;
+        }
+    }
+}
 
 static void rx_return(void)
 {
     uint32_t prod_index = ring_rx->prod_index;
-    THREAD_MEMORY_ACQUIRE();
-    sddf_dprintf("Rx prod_index: 0x%x\n", prod_index);
-    sddf_dprintf("Rx cons_index: 0x%x\n", ring_rx->cons_index);
+    bool packets_transferred = false;
 
-    while (1) {
-        if (ring_rx->cons_index == ring_rx->prod_index) return;
+    while (!hw_ring_empty(&rx)) {
+        uint32_t idx = rx.head % rx.capacity;
+        volatile struct genet_dma_desc *d = &(rx.descr[idx]);
+        if (ring_rx->cons_index == ring_rx->prod_index) {
+            break;
+        }
 
-        uint32_t idx = ring_rx->cons_index % NUM_DESCS;
-        volatile struct genet_dma_desc *d = &rx_desc[idx];
+        THREAD_MEMORY_ACQUIRE();
 
         uint64_t addr = ((uint64_t)(d->addr_hi) << 32) | d->addr_lo;
         net_buff_desc_t buffer = { addr , d->status >> DMA_BUFLEN_SHIFT };
-        sddf_dprintf("recv buf[%d] at 0x%x - addr: 0x%lx, len: 0x%x\n", idx, &rx_desc[idx], buffer.io_or_offset, buffer.len);
-        ring_rx->cons_index = (ring_rx->cons_index + 1 )% RING_INDEX_CAPACITY;
+        sddf_dprintf("recv buf[%d] - addr: 0x%lx, len: 0x%x\n", idx, buffer.io_or_offset, buffer.len);
+        int err = net_enqueue_active(&rx_queue, buffer);
+        assert(!err);
 
+        packets_transferred = true;
+        rx.head++;
+        ring_rx->cons_index = rx.head % rx.max_index; /* Update cons_index in device regs */
     }
-    THREAD_MEMORY_RELEASE();
+
+    if (packets_transferred && net_require_signal_active(&rx_queue)) {
+        net_cancel_signal_active(&rx_queue);
+        sddf_notify(config.virt_rx.id);
+    }
 }
 
+static void tx_provide()
+{
+    bool reprocess = true;
+    while (reprocess) {
+        while (!(hw_ring_full(&tx)) && !net_queue_empty_active(&tx_queue)) {
+            net_buff_desc_t buffer;
+            int err = net_dequeue_active(&tx_queue, &buffer);
+            assert(!err);
+
+            uint32_t idx = tx.tail % tx.capacity;
+            uint16_t stat = (0x3F << DMA_TX_QTAG_SHIFT) | DMA_TX_APPEND_CRC | DMA_SOP | DMA_EOP;
+            update_ring_slot(&tx, idx, buffer.io_or_offset, stat);
+            tx.tail++;
+            ring_tx->prod_index = tx.tail % tx.max_index;
+        }
+
+        net_request_signal_active(&tx_queue);
+        reprocess = false;
+
+        if (!hw_ring_full(&tx) && !net_queue_empty_active(&tx_queue)) {
+            net_cancel_signal_active(&tx_queue);
+            reprocess = true;
+        }
+    }
+}
+
+static void tx_return(void)
+{
+    bool enqueued = false;
+    while (!hw_ring_empty(&tx)) {
+        /* Ensure that this buffer has been sent by the device */
+        uint32_t idx = tx.head % tx.capacity;
+        volatile struct genet_dma_desc *d = &(tx.descr[idx]);
+        if (ring_tx->cons_index == ring_tx->prod_index) {
+            break;
+        }
+
+        THREAD_MEMORY_ACQUIRE();
+
+        uint64_t addr = ((uint64_t)(d->addr_hi) << 32) | d->addr_lo;
+        net_buff_desc_t buffer = { addr, 0 };
+        int err = net_enqueue_free(&tx_queue, buffer);
+        assert(!err);
+
+        enqueued = true;
+        tx.head++;
+    }
+
+    if (enqueued && net_require_signal_free(&tx_queue)) {
+        net_cancel_signal_free(&tx_queue);
+        sddf_notify(config.virt_tx.id);
+    }
+}
 
 static void handle_irq(void)
 {
-    uint32_t irq_status = dev_regs->intrl2_cpu_stat & ~(dev_regs->intrl2_cpu_stat_mask);
+    uint32_t irq_status = eth->intrl2_cpu_stat & ~(eth->intrl2_cpu_stat_mask);
     while (irq_status) {
         if (irq_status & GENET_IRQ_TXDMA_DONE) {
-            /* tx_return(); */
-            /* tx_provide(); */
+            tx_return();
+            tx_provide();
         }
         if (irq_status & GENET_IRQ_RXDMA_DONE) {
             rx_return();
-            /* rx_provide(); */
+            rx_provide();
         }
-        dev_regs->intrl2_cpu_clear = irq_status;
-        irq_status = dev_regs->intrl2_cpu_stat & ~(dev_regs->intrl2_cpu_stat_mask);
+        eth->intrl2_cpu_clear = irq_status;
+        irq_status = eth->intrl2_cpu_stat & ~(eth->intrl2_cpu_stat_mask);
     }
 
     rx_return();
@@ -128,24 +259,24 @@ static void handle_irq(void)
 static void eth_setup(void)
 {
     sddf_printf("ethernet driver\n");
-    dev_regs = device_resources.regions[0].region.vaddr;
+    eth = device_resources.regions[0].region.vaddr;
 
-    uint8_t version_major = (dev_regs->sys_rev_ctrl >> 24) & 0x0f;
+    uint8_t version_major = (eth->sys_rev_ctrl >> 24) & 0x0f;
     if (version_major != 6) {
         sddf_printf("Unsupported GENET version\n");
     }
     sddf_printf("GENET HW version: %d\n", version_major);
 
     // set interface
-    dev_regs->sys_port_ctrl = PORT_MODE_EXT_GPHY;
+    eth->sys_port_ctrl = PORT_MODE_EXT_GPHY;
 
     // rbuf clear
-    dev_regs->sys_rbuf_flush_ctrl = 0;
+    eth->sys_rbuf_flush_ctrl = 0;
 
     // disable MAC while updating its registers
-    dev_regs->umac_cmd = 0;
+    eth->umac_cmd = 0;
     // issue soft reset with (rg)mii loopback to ensure a stable rxclk
-    dev_regs->umac_cmd = CMD_SW_RESET | CMD_LCL_LOOP_EN;
+    eth->umac_cmd = CMD_SW_RESET | CMD_LCL_LOOP_EN;
 
     // ========== MDIO init ==========
     // get ethernet uid
@@ -216,8 +347,8 @@ static void eth_setup(void)
     sddf_dprintf("MAC address: %02x:%02x:%02x:%02x:%02x:%02x\n",
                  mac[0], mac[1], mac[2],
                  mac[3], mac[4], mac[5]);
-    dev_regs->umac_mac0 = mac[0] << 24 | mac[1] << 16 | mac[2] << 8 | mac[3];
-    dev_regs->umac_mac1 = mac[4] << 8 | mac[5];
+    eth->umac_mac0 = mac[0] << 24 | mac[1] << 16 | mac[2] << 8 | mac[3];
+    eth->umac_mac1 = mac[4] << 8 | mac[5];
 
     sddf_dprintf("mii_contrl: 0x%x\n", bcmgenet_mdio_read(BCM54213PE_MII_CONTROL));
     sddf_dprintf("mii_status: 0x%x\n", bcmgenet_mdio_read(BCM54213PE_MII_STATUS));
@@ -230,37 +361,37 @@ static void eth_setup(void)
     }
 
     // ========== UMAC Reset ==========
-    sddf_dprintf("rbug_ctrl: 0x%x\n", dev_regs->sys_rbuf_flush_ctrl);
-    dev_regs->sys_rbuf_flush_ctrl |= BIT(1);
-    dev_regs->sys_rbuf_flush_ctrl &= ~BIT(1);
+    sddf_dprintf("rbug_ctrl: 0x%x\n", eth->sys_rbuf_flush_ctrl);
+    eth->sys_rbuf_flush_ctrl |= BIT(1);
+    eth->sys_rbuf_flush_ctrl &= ~BIT(1);
     sleep_us(10);
 
-    dev_regs->sys_rbuf_flush_ctrl = 0;
+    eth->sys_rbuf_flush_ctrl = 0;
     sleep_us(10);
 
-    dev_regs->umac_cmd = 0;
-    dev_regs->umac_cmd = CMD_SW_RESET | CMD_LCL_LOOP_EN;
+    eth->umac_cmd = 0;
+    eth->umac_cmd = CMD_SW_RESET | CMD_LCL_LOOP_EN;
     sleep_us(2);
 
-    dev_regs->umac_cmd = 0;
-    dev_regs->umac_mib_ctrl = MIB_RESET_RX | MIB_RESET_TX | MIB_RESET_RUNT;
-    dev_regs->umac_mib_ctrl = 0;
-    dev_regs->umac_max_frame_len = ENET_MAX_MTU_SIZE;
+    eth->umac_cmd = 0;
+    eth->umac_mib_ctrl = MIB_RESET_RX | MIB_RESET_TX | MIB_RESET_RUNT;
+    eth->umac_mib_ctrl = 0;
+    eth->umac_max_frame_len = ENET_MAX_MTU_SIZE;
 
-    dev_regs->rbuf_ctrl |= RBUF_ALIGN_2B;
-    dev_regs->rbuf_tbuf_size_ctrl = 1;
+    eth->rbuf_ctrl |= RBUF_ALIGN_2B;
+    eth->rbuf_tbuf_size_ctrl = 1;
     sddf_dprintf("UMAC reset finished\n");
 
     // ========== Disable DMA ==========
-    dev_regs->dma_tx.ctrl &= ~BIT(DMA_EN);
-    dev_regs->dma_rx.ctrl &= ~BIT(DMA_EN);
-    dev_regs->umac_tx_flush = 1;
+    eth->dma_tx.ctrl &= ~BIT(DMA_EN);
+    eth->dma_rx.ctrl &= ~BIT(DMA_EN);
+    eth->umac_tx_flush = 1;
     sleep_us(100);
-    dev_regs->umac_tx_flush = 0;
+    eth->umac_tx_flush = 0;
 
     // ========== Rx Ring Init ==========
-    ring_rx = (struct genet_dma_ring_rx *)&dev_regs->dma_rx.ring;
-    dev_regs->dma_rx.burst_size = DMA_MAX_BURST_LENGTH;
+    ring_rx = (struct genet_dma_ring_rx *)&eth->dma_rx.ring;
+    eth->dma_rx.burst_size = DMA_MAX_BURST_LENGTH;
     ring_rx->start_addr = 0;
     ring_rx->read_prt = 0;
     ring_rx->write_ptr = 0;
@@ -269,23 +400,23 @@ static void eth_setup(void)
     ring_rx->cons_index = 0;
     ring_rx->buf_size = (NUM_DESCS << 16) | RX_BUF_LENGTH;
     ring_rx->xon_xoff_thresh = (NUM_DESCS >> 4) | (5 << 16);
-    dev_regs->dma_rx.ring_cfg = BIT(DEFAULT_Q);
+    eth->dma_rx.ring_cfg = BIT(DEFAULT_Q);
 
     // ========== Rx Descs Init ==========
-    uintptr_t rx_desc_phys = device_resources.regions[2].io_addr;
-    rx_desc = (struct genet_dma_desc *)&dev_regs->dma_rx.descs;
-    tx_desc = (struct genet_dma_desc *)&dev_regs->dma_tx.descs;
-    for (int i = 0; i < NUM_DESCS; i++) {
-        rx_desc[i].addr_lo = (rx_desc_phys + i * RX_BUF_LENGTH) & 0xFFFFFFFF;
-        rx_desc[i].addr_hi = (rx_desc_phys + i * RX_BUF_LENGTH) >> 32;
-        rx_desc[i].status = (RX_BUF_LENGTH << DMA_BUFLEN_SHIFT) | DMA_OWN;
-    }
+//    uintptr_t rx_desc_phys = device_resources.regions[2].io_addr;
+//    rx_desc = (struct genet_dma_desc *)&eth->dma_rx.descs;
+//    tx_desc = (struct genet_dma_desc *)&eth->dma_tx.descs;
+//    for (int i = 0; i < NUM_DESCS; i++) {
+//        rx_desc[i].addr_lo = (rx_desc_phys + i * RX_BUF_LENGTH) & 0xFFFFFFFF;
+//        rx_desc[i].addr_hi = (rx_desc_phys + i * RX_BUF_LENGTH) >> 32;
+//        rx_desc[i].status = (RX_BUF_LENGTH << DMA_BUFLEN_SHIFT) | DMA_OWN;
+//    }
 
     // ========== Tx Ring Init ==========
-    sddf_dprintf("dma_tx: 0x%lx\n", &dev_regs->dma_tx);
-    ring_tx = (struct genet_dma_ring_tx *)&dev_regs->dma_tx.ring;
+    sddf_dprintf("dma_tx: 0x%lx\n", &eth->dma_tx);
+    ring_tx = (struct genet_dma_ring_tx *)&eth->dma_tx.ring;
     sddf_dprintf("Tx ring addr: 0x%lx\n", ring_tx);
-    dev_regs->dma_tx.burst_size = DMA_MAX_BURST_LENGTH;
+    eth->dma_tx.burst_size = DMA_MAX_BURST_LENGTH;
     ring_tx->start_addr = 0;
     // TODO: why set read_ptr multiple times in rt-thread?
     ring_tx->read_ptr = 0;
@@ -299,14 +430,14 @@ static void eth_setup(void)
 
     // ========== Enable DMA ==========
     uint32_t dma_ctrl = (1 << (DEFAULT_Q + DMA_RING_BUF_EN_SHIFT)) | DMA_EN;
-    dev_regs->dma_tx.ctrl = dma_ctrl;
-    dev_regs->dma_rx.ctrl |= dma_ctrl;
+    eth->dma_tx.ctrl = dma_ctrl;
+    eth->dma_rx.ctrl |= dma_ctrl;
 
     // ========== Adjust Link ==========
-    uint32_t oob_ctrl = dev_regs->ext_rgmii_oob_ctrl | RGMII_LINK | RGMII_MODE_EN | ID_MODE_DIS;
-    dev_regs->ext_rgmii_oob_ctrl = oob_ctrl;
+    uint32_t oob_ctrl = eth->ext_rgmii_oob_ctrl | RGMII_LINK | RGMII_MODE_EN | ID_MODE_DIS;
+    eth->ext_rgmii_oob_ctrl = oob_ctrl;
     sleep_us(1000);
-    dev_regs->umac_cmd = UMAC_SPEED_1000 << CMD_SPEED_SHIFT;
+    eth->umac_cmd = UMAC_SPEED_1000 << CMD_SPEED_SHIFT;
 
     // ========== Index Reset ==========
     sddf_dprintf("Tx cons_index: 0x%x\n", ring_tx->cons_index);
@@ -325,16 +456,29 @@ static void eth_setup(void)
         /* never break if no sleep here */
         sleep_us(1);
     }
+
     ring_rx->cons_index = index_flag;
     ring_rx->prod_index = index_flag;
+    rx.head = index_flag;
+    rx.tail = index_flag;
+    rx.capacity = NUM_DESCS;
+    rx.max_index = 0x10000;
+    rx.descr = (struct genet_dma_desc *)&eth->dma_rx.descs;
+
+    tx.head = 0;
+    tx.tail = 0;
+    tx.capacity = NUM_DESCS;
+    tx.max_index = 0x10000;
+    tx.descr = (struct genet_dma_desc *)&eth->dma_tx.descs;
+
     sddf_dprintf("Rx cons_index: 0x%x\n", ring_rx->cons_index);
     sddf_dprintf("Rx prod_index: 0x%x\n", ring_rx->prod_index);
 
     // ========== Enable Rx/Tx ==========
-    dev_regs->umac_cmd |= (CMD_TX_EN | CMD_RX_EN);
+    eth->umac_cmd |= (CMD_TX_EN | CMD_RX_EN);
 
     // ========== Enable IRQ ==========
-    dev_regs->intrl2_cpu_clear_mask = GENET_IRQ_TXDMA_DONE | GENET_IRQ_RXDMA_DONE;
+    eth->intrl2_cpu_clear_mask = GENET_IRQ_TXDMA_DONE | GENET_IRQ_RXDMA_DONE;
     sddf_dprintf("Ready\n");
 }
 
@@ -349,6 +493,13 @@ void init(void)
 
     eth_setup();
 
+    net_queue_init(&rx_queue, config.virt_rx.free_queue.vaddr, config.virt_rx.active_queue.vaddr,
+                   config.virt_rx.num_buffers);
+    net_queue_init(&tx_queue, config.virt_tx.free_queue.vaddr, config.virt_tx.active_queue.vaddr,
+                   config.virt_tx.num_buffers);
+
+    rx_provide();
+    tx_provide();
 }
 
 void notified(sddf_channel ch)
