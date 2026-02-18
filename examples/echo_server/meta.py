@@ -329,7 +329,6 @@ def generate(
 
     serial_system.add_client(client0)
     serial_system.add_client(client1)
-    serial_system.add_client(ethernet_driver)
     timer_system.add_client(client0)
     timer_system.add_client(client1)
     timer_system.add_client(ethernet_driver)

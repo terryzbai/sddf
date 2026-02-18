@@ -24,16 +24,10 @@
 #include <sddf/timer/config.h>
 #include <sddf/timer/client.h>
 
-#include <sddf/serial/queue.h> // TODO: remove
-#include <sddf/serial/config.h>
-
-serial_queue_handle_t serial_tx_queue_handle;
-
 #include "ethernet.h"
 
 __attribute__((__section__(".device_resources"))) device_resources_t device_resources;
 __attribute__((__section__(".net_driver_config"))) net_driver_config_t config;
-__attribute__((__section__(".serial_client_config"))) serial_client_config_t serial_config;
 __attribute__((__section__(".timer_client_config"))) timer_client_config_t timer_config;
 
 volatile struct genet_regs *eth;
@@ -249,12 +243,11 @@ static void handle_irq(void)
 
 static void eth_setup(void)
 {
-    sddf_printf("ethernet driver\n");
     eth = device_resources.regions[0].region.vaddr;
 
     uint8_t version_major = (eth->sys_rev_ctrl >> 24) & 0x0f;
     if (version_major != 6) {
-      sddf_printf("Unsupported GENET version\n");
+        return;
     }
 
     // set interface
@@ -273,8 +266,7 @@ static void eth_setup(void)
     uint32_t uid_high = bcmgenet_mdio_read(BCM54213PE_PHY_IDENTIFIER_HIGH);
     uint32_t uid_low = bcmgenet_mdio_read(BCM54213PE_PHY_IDENTIFIER_LOW);
     if (((uid_high << 16) | (uid_low & 0xFFFF)) == 0) {
-      sddf_dprintf("ERROR: invalid ethernet UID '0'\n");
-      return;
+        return;
     }
 
     // reset phy
@@ -326,7 +318,6 @@ static void eth_setup(void)
         // check if response is for us
         if (r == mbox_regs->read) {
             if (mbox[1] != MBOX_RESPONSE){
-                sddf_dprintf("ERROR: Invalid mbox response\n");
                 return;
             }
             break;
@@ -445,10 +436,6 @@ static void eth_setup(void)
 
 void init(void)
 {
-    serial_queue_init(&serial_tx_queue_handle, serial_config.tx.queue.vaddr, serial_config.tx.data.size,
-                      serial_config.tx.data.vaddr);
-    serial_putchar_init(serial_config.tx.id, &serial_tx_queue_handle);
-
     mbox_regs = (struct mbox_regs *)0x3000880;
     mbox = device_resources.regions[3].region.vaddr;
 
