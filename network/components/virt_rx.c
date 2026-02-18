@@ -87,11 +87,6 @@ void rx_return(void)
             //
             // [1]: https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Instructions/DC-IVAC--Data-or-unified-Cache-line-Invalidate-by-VA-to-PoC
             cache_clean_and_invalidate(buffer_vaddr, buffer_vaddr + buffer.len);
-            uint8_t *buf_test = (uint32_t *)buffer_vaddr;
-            for (int i = 0; i < buffer.len; i++) {
-//                sddf_dprintf("%02x ", buf_test[i]);
-            }
- //           sddf_dprintf("\n");
 
             int client = get_mac_addr_match((struct ethernet_header *) buffer_vaddr);
             if (client == BROADCAST_ID) {

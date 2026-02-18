@@ -15,6 +15,7 @@
 #pragma once
 
 #define PORT_MODE_EXT_GPHY 3
+#define CMD_PROMISC                 BIT(4)
 #define CMD_SW_RESET                BIT(13)
 #define CMD_LCL_LOOP_EN             BIT(15)
 
@@ -38,8 +39,6 @@
 #define CMD_SPEED_MASK              (3)
 #define CMD_SW_RESET                BIT(13)
 #define CMD_LCL_LOOP_EN             BIT(15)
-#define CMD_TX_EN                   BIT(0)
-#define CMD_RX_EN                   BIT(1)
 
 #define  GENET_IRQ_TXDMA_DONE           BIT(16)
 #define  GENET_IRQ_RXDMA_DONE           BIT(13)
@@ -176,10 +175,12 @@ struct genet_dma_ring_tx {
     uint8_t unused4[16];              // 0x30-0x40
 };
 
+typedef struct genet_dma_ring { uint8_t x[64]; } genet_dma_ring_t;
+
 struct genet_dma {
     struct genet_dma_desc descs[NUM_DESCS];               // 0x000
-    struct genet_dma_ring_rx default_rings[DEFAULT_Q];    // 0xC00-0x1000
-    struct genet_dma_ring_rx ring;                        // 0x1000-0x1040
+    genet_dma_ring_t default_rings[DEFAULT_Q];            // 0xC00-0x1000
+    genet_dma_ring_t ring;                                // 0x1000-0x1040
     uint32_t ring_cfg;                                    // 0x1040
     uint32_t ctrl;                                        // 0x1044
     uint32_t unused2;                                     // 0x1048
@@ -191,38 +192,40 @@ struct genet_regs {
     uint32_t sys_port_ctrl;          // 0x04
     uint32_t sys_rbuf_flush_ctrl;    // 0x08
     uint32_t sys_tbuf_flush_ctrl;    // 0x0C
-    uint32_t sys_unused[28];         // 0x10-0x80
+    uint8_t sys_unused[112];         // 0x10-0x80
     uint32_t ext_pwr_mgmt;           // 0x80
-    uint32_t ext_unused1[2];         // 0x84
+    uint8_t ext_unused1[8];          // 0x84-0x8C
     uint32_t ext_rgmii_oob_ctrl;     // 0x8C
-    uint32_t ext_unused2[3];         // 0x90-0x9C
+    uint8_t ext_unused2[12];         // 0x90-0x9C
     uint32_t ext_gphy_ctrl;          // 0x9C
-    uint32_t ext_unused3[88];        // 0xA0-0x200
+    uint8_t ext_unused3[352];        // 0xA0-0x200
     uint32_t intrl2_cpu_stat;        // 0x200
     uint32_t intrl2_unused1;         // 0x204-0x208
     uint32_t intrl2_cpu_clear;       // 0x208
     uint32_t intrl2_cpu_stat_mask;   // 0x20C
     uint32_t intrl2_cpu_set_mask;    // 0x210
     uint32_t intrl2_cpu_clear_mask;  // 0x214
-    uint32_t intrl2_unused2[58];     // 0x218-0x300
+    uint8_t intrl2_unused2[232];     // 0x218-0x300
     uint32_t rbuf_ctrl;              // 0x300
-    uint32_t rbuf_unused1[44];       // 0x304-0x3B4
+    uint8_t rbuf_unused1[176];       // 0x304-0x3B4
     uint32_t rbuf_tbuf_size_ctrl;    // 0x3B4
-    uint32_t rbuf_unused2[274];      // 0x3B8-0x800
-    uint32_t umac_unused1[2];        // 0x800-0x808
+    uint8_t rbuf_unused2[1096];      // 0x3B8-0x800
+    uint8_t umac_unused1[8];         // 0x800-0x808
     uint32_t umac_cmd;               // 0x808
     uint32_t umac_mac0;              // 0x80C
     uint32_t umac_mac1;              // 0x810
     uint32_t umac_max_frame_len;     // 0x814
-    uint32_t umac_unused2[204];      // 0x818-0xB48
-    uint32_t umac_tx_flush;          // 0xB48
-    uint32_t umac_unused3[141];      // 0xB4C-0xD80
+    uint8_t umac_unused2[796];       // 0x818-0xB34
+    uint32_t umac_tx_flush;          // 0xB34
+    uint8_t umac_unused3[584];       // 0xB38-0xD80
     uint32_t umac_mib_ctrl;          // 0xD80
-    uint32_t umac_unused4[36];       // 0xD80-0xE14
+    uint8_t umac_unused4[144];       // 0xD84-0xE14
     uint32_t umac_mdio_cmd;          // 0xE14
-    uint32_t unused1[1146];          // 0xE18-0x2000
+    uint8_t unused1[56];             // 0xE18-0xE50
+    uint32_t umac_mdf_ctrl;          // 0xE50
+    uint8_t unused2[4524];           // 0xE54-0x2000
     struct genet_dma dma_rx;         // 0x2000-0x304C
-    uint32_t unused2[1004];          // 0x3050-0x4000
+    uint32_t unused3[1004];          // 0x3050-0x4000
     struct genet_dma dma_tx;         // 0x4000
 };
 

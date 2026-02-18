@@ -20,7 +20,7 @@
             },
             {
                 "name": "mbox_message",
-                "size": 4096
+                "size": 32768
             }
         ],
         "irqs": [
