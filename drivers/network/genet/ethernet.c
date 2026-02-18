@@ -187,7 +187,6 @@ static void tx_provide()
 
             uint32_t idx = tx.tail % tx.capacity;
             uint32_t stat = (buffer.len << DMA_BUFLENGTH_SHIFT) | (0x3F << DMA_TX_QTAG_SHIFT) | DMA_TX_APPEND_CRC | DMA_SOP | DMA_EOP;
-            volatile struct genet_dma_desc *d = &(tx.descr[idx]);
             update_ring_slot(&tx, idx, buffer.io_or_offset, stat);
 
             tx.tail++;
@@ -234,8 +233,6 @@ static void handle_irq(void)
     uint32_t irq_status = eth->intrl2_cpu_stat & ~(eth->intrl2_cpu_stat_mask);
     while (irq_status) {
         if (irq_status & GENET_IRQ_TXDMA_DONE) {
-            uint32_t idx = tx.tail % tx.capacity - 1;
-            volatile struct genet_dma_desc *d = &(tx.descr[idx]);
             tx_return();
             tx_provide();
         }
@@ -259,7 +256,6 @@ static void eth_setup(void)
     if (version_major != 6) {
       sddf_printf("Unsupported GENET version\n");
     }
-    sddf_printf("GENET HW version: %d\n", version_major);
 
     // set interface
     eth->sys_port_ctrl = PORT_MODE_EXT_GPHY;
@@ -305,7 +301,6 @@ static void eth_setup(void)
     bcmgenet_mdio_write(BCM54213PE_MII_CONTROL, (MII_CONTROL_AUTO_NEGOTIATION_ENABLED | MII_CONTROL_AUTO_NEGOTIATION_RESTART | MII_CONTROL_PHY_FULL_DUPLEX | MII_CONTROL_SPEED_SELECTION));
 
     while (~bcmgenet_mdio_read(BCM54213PE_MII_STATUS) & MII_STATUS_AUTO_NEGOTIATION_COMPLETE);
-    sddf_dprintf("finished MDIO init\n");
 
     // ========== Set MAC address ==========
     mbox[0] = 8*4;                                 // length of the message
@@ -325,34 +320,26 @@ static void eth_setup(void)
     mbox_regs->write = r;
     // wait for the response
     while(1)
-      {
+    {
         // check if response is ready
         while (mbox_regs->status & MBOX_EMPTY);
         // check if response is for us
         if (r == mbox_regs->read) {
-          if (mbox[1] != MBOX_RESPONSE){
-            sddf_dprintf("ERROR: Invalid mbox response\n");
-            return;
-          }
-          break;
+            if (mbox[1] != MBOX_RESPONSE){
+                sddf_dprintf("ERROR: Invalid mbox response\n");
+                return;
+            }
+            break;
         }
-      }
+    }
     char *mac = (char *)&mbox[5];
-    sddf_dprintf("MAC address: %02x:%02x:%02x:%02x:%02x:%02x\n",
-                 mac[0], mac[1], mac[2],
-                 mac[3], mac[4], mac[5]);
     eth->umac_mac0 = mac[0] << 24 | mac[1] << 16 | mac[2] << 8 | mac[3];
     eth->umac_mac1 = mac[4] << 8 | mac[5];
 
     // ========== Check Link Speed ==========
-    uint32_t link_status = bcmgenet_mdio_read(BCM54213PE_STATUS);
-    sddf_dprintf("status: 0x%x\n", link_status);
-    if ((link_status & BIT(10)) | (link_status & BIT(11))) {
-      sddf_dprintf("Support link mode speed 1000M\n");
-    }
+    /* uint32_t link_status = bcmgenet_mdio_read(BCM54213PE_STATUS); */
 
     // ========== UMAC Reset ==========
-    sddf_dprintf("rbug_ctrl: 0x%x\n", eth->sys_rbuf_flush_ctrl);
     eth->sys_rbuf_flush_ctrl |= BIT(1);
     eth->sys_rbuf_flush_ctrl &= ~BIT(1);
     sleep_us(10);
@@ -454,8 +441,6 @@ static void eth_setup(void)
 
     // ========== Enable IRQ ==========
     eth->intrl2_cpu_clear_mask = GENET_IRQ_TXDMA_DONE | GENET_IRQ_RXDMA_DONE;
-
-    sddf_dprintf("Ready\n");
 }
 
 void init(void)
