@@ -88,6 +88,8 @@
 #define DMA_TX_DO_CSUM               (0x0010)
 #define DMA_TX_QTAG_SHIFT            (7)
 
+#define DMA_TIMEOUT_MASK             0xFFFF
+
 #define NUM_DESCS                    256
 #define DESC_SIZE                    12
 #define RX_BUF_LENGTH                2048
@@ -183,8 +185,10 @@ struct genet_dma {
     genet_dma_ring_t ring;                                // 0x1000-0x1040
     uint32_t ring_cfg;                                    // 0x1040
     uint32_t ctrl;                                        // 0x1044
-    uint32_t unused2;                                     // 0x1048
+    uint8_t unused1[4];                                   // 0x1048
     uint32_t burst_size;                                  // 0x104C
+    uint8_t unused3[112];                                 // 0x1050-0x10C0
+    uint32_t ring16_timeout;                              // 0x10C0
 };
 
 struct genet_regs {
@@ -224,13 +228,15 @@ struct genet_regs {
     uint8_t unused1[56];             // 0xE18-0xE50
     uint32_t umac_mdf_ctrl;          // 0xE50
     uint8_t unused2[4524];           // 0xE54-0x2000
-    struct genet_dma dma_rx;         // 0x2000-0x304C
-    uint32_t unused3[1004];          // 0x3050-0x4000
+    struct genet_dma dma_rx;         // 0x2000-0x30C4
+    uint8_t unused3[3900];           // 0x30C4-0x4000
     struct genet_dma dma_tx;         // 0x4000
 };
 
 #define MBOX_REQUEST    0
 #define MBOX_TAG_HARDWARE_GET_MAC_ADDRESS  0x00010003
+#define MBOX_TAG_HARDWARE_GET_CLK_RATE     0x00030002
+#define MBOX_TAG_HARDWARE_SET_CLK_RATE     0x00038002
 #define MBOX_TAG_LAST           0
 #define MBOX_ADDR       0x08000000
 #define MBOX_RESPONSE   0x80000000

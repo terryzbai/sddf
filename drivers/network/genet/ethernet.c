@@ -377,8 +377,11 @@ static void eth_setup(void)
     ring_rx->prod_index = 0;
     ring_rx->cons_index = 0;
     ring_rx->buf_size = (NUM_DESCS << 16) | RX_BUF_LENGTH;
+    ring_rx->mbuf_done_thresh = 1;
     ring_rx->xon_xoff_thresh = (NUM_DESCS >> 4) | (5 << 16);
     eth->dma_rx.ring_cfg = BIT(DEFAULT_Q);
+    // Set timeout to DIV_ROUND_UP(us * 1000, 8192)
+    eth->dma_rx.ring16_timeout = eth->dma_rx.ring16_timeout & ~DMA_TIMEOUT_MASK | 0x6;
 
     // ========== Tx Ring Init ==========
     ring_tx = (struct genet_dma_ring_tx *)&eth->dma_tx.ring;
@@ -443,6 +446,75 @@ static void eth_setup(void)
     eth->intrl2_cpu_clear_mask = GENET_IRQ_TXDMA_DONE | GENET_IRQ_RXDMA_DONE;
 }
 
+void rpi4_get_cpu_frequency()
+{
+    // ========== Get Clock Rate ==========
+    mbox[0] = 8*4;                                 // Length of the message
+    mbox[1] = MBOX_REQUEST;                        // Request code
+    mbox[2] = MBOX_TAG_HARDWARE_GET_CLK_RATE;      // tag
+    mbox[3] = 8;                                   // Buffer size
+    mbox[4] = 0;                                   // Response size
+    mbox[5] = 0x00000003;                          // Clock ID: ARM
+    mbox[6] = MBOX_TAG_LAST;                       // End tag
+
+    // 0x8 is the channel identifier for Property Tags
+    unsigned int r = device_resources.regions[3].io_addr | 0x8;
+    /* wait until we can write to the mailbox */
+    while (mbox_regs->status & MBOX_FULL);
+    // write the address of our message to the mailbox with channel identifier
+    mbox_regs->write = r;
+    // wait for the response
+    while(1)
+    {
+        // check if response is ready
+        while (mbox_regs->status & MBOX_EMPTY);
+        // check if response is for us
+        if (r == mbox_regs->read) {
+            if (mbox[1] != MBOX_RESPONSE){
+                return;
+            }
+            break;
+        }
+    }
+
+    /* uint32_t *cpu_freq = (uint32_t *)&mbox[6]; */
+    /* sddf_dprintf("cpu_freq: %u\n", *cpu_freq); */
+}
+
+void rpi4_set_cpu_frequency(uint32_t freq)
+{
+    /* // ========== Set Clock Rate ========== */
+    mbox[0] = 8*4;                                 // Length of the message
+    mbox[1] = MBOX_REQUEST;                        // Request code
+    mbox[2] = MBOX_TAG_HARDWARE_SET_CLK_RATE;      // tag
+    mbox[3] = 12;                                  // Buffer size
+    mbox[4] = 8;                                   // Response size
+    mbox[5] = 0x00000003;                          // Clock ID: ARM
+    mbox[6] = freq;                                // Frequency in Hz (1.5GHz)
+    mbox[7] = MBOX_TAG_LAST;                       // End tag
+
+    // 0x8 is the channel identifier for Property Tags
+    unsigned int r = device_resources.regions[3].io_addr | 0x8;
+    /* wait until we can write to the mailbox */
+    while (mbox_regs->status & MBOX_FULL);
+    // write the address of our message to the mailbox with channel identifier
+    mbox_regs->write = r;
+    // wait for the response
+    while(1)
+    {
+        // check if response is ready
+        while (mbox_regs->status & MBOX_EMPTY);
+        // check if response is for us
+        if (r == mbox_regs->read) {
+            if (mbox[1] != MBOX_RESPONSE){
+                sddf_dprintf("Failed to ajust CPU frequency\n");
+                return;
+            }
+            break;
+        }
+    }
+}
+
 void init(void)
 {
     serial_queue_init(&serial_tx_queue_handle, serial_config.tx.queue.vaddr, serial_config.tx.data.size,
@@ -452,6 +524,8 @@ void init(void)
     mbox_regs = (struct mbox_regs *)0x3000880;
     mbox = device_resources.regions[3].region.vaddr;
 
+    rpi4_set_cpu_frequency(1500000000);
+    rpi4_get_cpu_frequency();
     eth_setup();
 
     net_queue_init(&rx_queue, config.virt_rx.free_queue.vaddr, config.virt_rx.active_queue.vaddr,
