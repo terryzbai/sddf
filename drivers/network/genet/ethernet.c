@@ -381,7 +381,7 @@ static void eth_setup(void)
     ring_rx->xon_xoff_thresh = (NUM_DESCS >> 4) | (5 << 16);
     eth->dma_rx.ring_cfg = BIT(DEFAULT_Q);
     // Set timeout to DIV_ROUND_UP(us * 1000, 8192)
-    eth->dma_rx.ring16_timeout = eth->dma_rx.ring16_timeout & ~DMA_TIMEOUT_MASK | 0x6;
+    eth->dma_rx.ring16_timeout = eth->dma_rx.ring16_timeout & ~DMA_TIMEOUT_MASK | 0xFF;
 
     // ========== Tx Ring Init ==========
     ring_tx = (struct genet_dma_ring_tx *)&eth->dma_tx.ring;
@@ -477,8 +477,8 @@ void rpi4_get_cpu_frequency()
         }
     }
 
-    /* uint32_t *cpu_freq = (uint32_t *)&mbox[6]; */
-    /* sddf_dprintf("cpu_freq: %u\n", *cpu_freq); */
+    uint32_t *cpu_freq = (uint32_t *)&mbox[6];
+    sddf_dprintf("cpu_freq: %u\n", *cpu_freq);
 }
 
 void rpi4_set_cpu_frequency(uint32_t freq)
@@ -524,8 +524,8 @@ void init(void)
     mbox_regs = (struct mbox_regs *)0x3000880;
     mbox = device_resources.regions[3].region.vaddr;
 
-    rpi4_set_cpu_frequency(1500000000);
-    rpi4_get_cpu_frequency();
+    rpi4_set_cpu_frequency(1000000000);
+    /* rpi4_get_cpu_frequency(); */
     eth_setup();
 
     net_queue_init(&rx_queue, config.virt_rx.free_queue.vaddr, config.virt_rx.active_queue.vaddr,
