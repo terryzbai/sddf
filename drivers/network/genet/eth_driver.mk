@@ -18,7 +18,7 @@ ${CHECK_NETDRV_GENET_FLAGS_MD5}:
 	touch $@
 
 eth_driver_genet.elf: network/genet/ethernet.o libsddf_util.a
-	$(LD) $(LDFLAGS) $< $(LIBS) -o $@
+	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 network/genet/ethernet.o: ${ETHERNET_DRIVER_DIR}/ethernet.c ${CHECK_NETDRV_FLAGS_MD5} | $(SDDF_LIBC_INCLUDE)
 	mkdir -p network/genet

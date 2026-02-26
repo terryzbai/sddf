@@ -299,6 +299,155 @@ static struct pbuf *create_interface_buffer(uint64_t offset, size_t length)
                                (void *)(offset + sddf_state.rx_buffer_data_region), NET_BUFFER_SIZE);
 }
 
+/* --------------------Experimental Code------------------- */
+typedef struct __attribute__((__packed__)) eth_hdr_ello {
+    /* destination MAC address */
+    uint8_t ethdst_addr[ETH_HWADDR_LEN];
+    /* source MAC address */
+    uint8_t ethsrc_addr[ETH_HWADDR_LEN];
+    /* if ethtype <= 1500 it holds the length of the frame. Otherwise, it holds
+    the protocol of payload encapsulated in the frame */
+    uint16_t ethtype;
+} eth_hdr_t;
+
+typedef struct __attribute__((__packed__)) ipv4_hdr_ello {
+    /* internet header length in 32-bit words, variable due to optional fields */
+    uint8_t ihl:4;
+    /* IP version, always 4 for IPv4 */
+    uint8_t version:4;
+    /* explicit congestion notification, optional */
+    uint8_t ecn:2;
+    /* differentiated services code point */
+    uint8_t dscp:6;
+    /* total packet length in bytes, including header and data */
+    uint16_t tot_len;
+    /* identifier of packet, used in packet fragmentation */
+    uint16_t id;
+    /* offset in 8 bytes of fragment relative to the beginning of the original
+    unfragmented IP datagram. Fragment offset is a 13 byte value split accross
+    frag_offset1 and frag_offset2 */
+    uint8_t frag_offset1:5;
+    /* if packet belongs to fragmented group, 1 indicates this is not the last
+    fragment */
+    uint8_t more_frag:1;
+    /* specifies whether datagram can be fragmented or not */
+    uint8_t no_frag:1;
+    /* reserved, set to 0 */
+    uint8_t reserved:1;
+    /* offset in 8 bytes of fragment relative to the beginning of the original
+    unfragmented IP datagram. Fragment offset is a 13 byte value split accross
+    frag_offset1 and frag_offset2 */
+    uint8_t frag_offset2;
+    /* time to live, in seconds but in practice router hops */
+    uint8_t ttl;
+    /* transport layer protocol of encapsulated packet */
+    uint8_t protocol;
+    /* internet checksum of IPv4 header */
+    uint16_t check;
+    /* source IP address */
+    uint32_t src_ip;
+    /* destination IP address */
+    uint32_t dst_ip;
+    /* optional fields excluded */
+} ipv4_hdr_t;
+typedef struct __attribute__((__packed__)) udp_hdr_ello {
+    /* source port */
+    uint16_t src_port;
+    /* destination port */
+    uint16_t dst_port;
+    /* length in bytes of the UDP datagram including header */
+    uint16_t len;
+    /* checksum over the UDP datagram and psuedo-header, optional for IPv4 */
+    uint16_t check;
+} udp_hdr_t;
+#define ETH_HDR_LEN sizeof(eth_hdr_t)
+#define IPV4_HDR_OFFSET ETH_HDR_LEN
+#define IPV4_HDR_LEN_MIN sizeof(ipv4_hdr_t)
+
+/**
+ *
+ *
+ */
+static uintptr_t bcmgenet_add_chksum(uintptr_t frame, struct pbuf *p)
+{
+    eth_hdr_t *ethhdr = (eth_hdr_t *)p->payload;
+    uint16_t eth_type = htons(ethhdr->ethtype);
+    sddf_dprintf("eth->type: 0x%x\n", ethhdr->ethtype);
+    sddf_dprintf("htons: 0x%x\n", htons(ethhdr->ethtype));
+
+    if (eth_type == 0x800) {
+        ipv4_hdr_t *iphdr = (ipv4_hdr_t *)((void *)p->payload + IPV4_HDR_OFFSET);
+        sddf_dprintf("IPV4_HDR_OFFSET: 0x%x\n", IPV4_HDR_OFFSET);
+        sddf_dprintf("protocol: 0x%x\n", iphdr->protocol);
+        if (iphdr->protocol == 17) {
+            uint8_t *pseudo_header = (uint8_t *)((void *)p->payload + 0x1a);
+            uint32_t sum = 0;
+            // src and dst ip addr
+            for (int i = 0; i < 8; i+=2) {
+                sum += ((pseudo_header[i] << 8) | pseudo_header[i+1]);
+            }
+
+            // Add Protocol ID (17 for UDP) and UDP Length
+            // The pseudo-header uses the UDP length twice if you count the UDP header itself
+            sum += 17;
+
+            pseudo_header = (uint8_t *)((void *)p->payload + 0x26);
+            sum += ((pseudo_header[0] << 8) | pseudo_header[1]);
+
+            // Fold 32-bit sum into 16 bits
+            sum = (sum & 0xFFFF) + (sum >> 16);
+
+            uint8_t *udp_csum = (uint8_t *)((void *)p->payload + 0x28);
+            udp_csum[0] = (sum >> 8) & 0xff;
+            udp_csum[1] = sum & 0xff;
+
+            struct bcmgenet_tsb *tsb = (struct bcmgneet_tsb *)frame;
+            tsb->length_status = 0;
+            tsb->tx_csum_info = ((34) << 16) | (34 + 6) | 0x80000000 | 0x8000;
+        } else if (iphdr->protocol == 6) {
+            uint8_t *pseudo_header = (uint8_t *)((void *)p->payload + 0x1a);
+            uint32_t sum = 0;
+            // src and dst ip addr
+            for (int i = 0; i < 8; i+=2) {
+                sum += ((pseudo_header[i] << 8) | pseudo_header[i+1]);
+            }
+
+            // TCP protocol (6)
+            sum += 6;
+
+            pseudo_header = (uint8_t *)((void *)p->payload + 0x10);
+            sum += (((pseudo_header[0] << 8) | pseudo_header[1]) - 20);
+
+            // Fold 32-bit sum into 16 bits
+            sum = (sum & 0xFFFF) + (sum >> 16);
+
+            uint8_t *tcp_csum = (uint8_t *)((void *)p->payload + 0x32);
+            tcp_csum[0] = (sum >> 8) & 0xff;
+            tcp_csum[1] = sum & 0xff;
+            sddf_dprintf("sum: 0x%x\n", sum);
+
+            struct bcmgenet_tsb *tsb = (struct bcmgneet_tsb *)frame;
+            tsb->length_status = 0;
+            tsb->tx_csum_info = ((0x22) << 16) | (0x32) | 0x80000000 | 0x8000;
+        } else {
+            uint8_t *buffer = (uint8_t *)p->payload;
+            for (int i = 0; i < p->len; i++) {
+                sddf_dprintf("%02x ", buffer[i]);
+                if (i % 16 == 0) {
+                    sddf_dprintf("\n");
+                }
+            }
+            sddf_dprintf("\n");
+        }
+    } else if (eth_type == 0x806) {
+        struct bcmgenet_tsb *tsb = (struct bcmgneet_tsb *)frame;
+        tsb->length_status = 0x2a << 16;
+        tsb->tx_csum_info = 0;
+        sddf_dprintf("p->len: 0x%x\n", p->len);
+    }
+    return 64;
+}
+
 /**
  * Copy a pbuf into an sddf buffer and insert it into the transmit active queue.
  * If client is RX only, and transmission is not intercepted, this function will
@@ -340,12 +489,18 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
 
     uintptr_t frame = buffer.io_or_offset + sddf_state.tx_buffer_data_region;
     uint16_t copied = 0;
+
+    if (PBUF_LINK_ENCAPSULATION_HLEN > 0) {
+        copied = bcmgenet_add_chksum(frame, p);
+    }
+
     for (struct pbuf *curr = p; curr != NULL; curr = curr->next) {
         memcpy((void *)(frame + copied), curr->payload, curr->len);
         copied += curr->len;
     }
 
     buffer.len = copied;
+    /* uint16_t *csum = (uint32_t *)(frame + 0x68); */
     err = net_enqueue_active(&sddf_state.tx_queue, buffer);
     assert(!err);
 
@@ -374,7 +529,7 @@ void sddf_lwip_process_rx(void)
             int err = net_dequeue_active(&sddf_state.rx_queue, &buffer);
             assert(!err);
 
-            struct pbuf *p = create_interface_buffer(buffer.io_or_offset, buffer.len);
+            struct pbuf *p = create_interface_buffer(buffer.io_or_offset + PBUF_LINK_ENCAPSULATION_HLEN, buffer.len - PBUF_LINK_ENCAPSULATION_HLEN);
             assert(p != NULL);
             if (lwip_state.netif.input(p, &lwip_state.netif) != ERR_OK) {
                 lwip_state.err_output("LWIP|ERROR: unknown error inputting pbuf into network stack\n");

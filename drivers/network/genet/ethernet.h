@@ -69,6 +69,11 @@
 #define RBUF_CTRL                   (GENET_RBUF_OFF + 0x00)
 #define RBUF_ALIGN_2B               BIT(1)
 
+#define RBUF_64B_EN                 BIT(0)
+#define RBUF_CTRL_CHKSUM_EN         BIT(0)
+#define TBUF_64B_EN                 BIT(0)
+#define TBUF_CTRL_CHKSUM_EN         BIT(0)
+
 /* Tx/Rx Dma Descriptor common bits */
 #define DMA_EN                       BIT(0)
 #define DMA_RING_BUF_EN_SHIFT        (0x01)
@@ -86,6 +91,7 @@
 #define DMA_TX_APPEND_CRC            (0x0040)
 #define DMA_TX_OW_CRC                (0x0020)
 #define DMA_TX_DO_CSUM               (0x0010)
+#define DMA_TX_CHKSUM_EN             BIT(15)
 #define DMA_TX_QTAG_SHIFT            (7)
 
 #define DMA_TIMEOUT_MASK             0xFFFF
@@ -213,7 +219,10 @@ struct genet_regs {
     uint32_t rbuf_ctrl;              // 0x300
     uint8_t rbuf_unused1[176];       // 0x304-0x3B4
     uint32_t rbuf_tbuf_size_ctrl;    // 0x3B4
-    uint8_t rbuf_unused2[1096];      // 0x3B8-0x800
+    uint8_t rbuf_unused2[584];       // 0x3B8-0x600
+    uint32_t tbuf_ctrl;              // 0x600
+    uint32_t tbuf_ck_ctrl;           // 0x604
+    uint8_t tbuf_unused[504];        // 0x608-0x800
     uint8_t umac_unused1[8];         // 0x800-0x808
     uint32_t umac_cmd;               // 0x808
     uint32_t umac_mac0;              // 0x80C

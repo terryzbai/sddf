@@ -33,6 +33,10 @@ struct ethernet_header {
  */
 #if defined(CONFIG_PLAT_IMX8MM_EVK) || defined(CONFIG_PLAT_MAAXBOARD) || defined(CONFIG_PLAT_IMX8MP_EVK)               \
     || defined(CONFIG_PLAT_ODROIDC4) || defined(CONFIG_PLAT_STAR64) || defined(CONFIG_PLAT_HIFIVE_P550)                \
-    || defined(CONFIG_PLAT_ODROIDC2)
+    || defined(CONFIG_PLAT_ODROIDC2) || defined(CONFIG_PLAT_BCM2711)
 #define NETWORK_HW_HAS_CHECKSUM
+#endif
+
+#if defined(CONFIG_PLAT_BCM2711)
+#define PBUF_LINK_ENCAPSULATION_HLEN 64
 #endif

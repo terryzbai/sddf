@@ -44,6 +44,16 @@ typedef struct pbuf_custom_offset {
     uint64_t offset;
 } pbuf_custom_offset_t;
 
+/* TSB structure for BCM GENET hardware chcksum offload */
+struct bcmgenet_tsb {
+    uint32_t length_status;      /* length and peripheral status */
+    uint32_t ext_status;         /* Extended status*/
+    uint32_t rx_csum;            /* partial rx checksum */
+    uint32_t unused1[9];         /* unused */
+    uint32_t tx_csum_info;       /* Tx checksum info. */
+    uint32_t unused2[3];         /* unused */
+};
+
 /**
  * Function type for output of sDDF lwIP errors.
  */
