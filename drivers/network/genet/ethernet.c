@@ -190,7 +190,6 @@ static void tx_provide()
             uint32_t idx = tx.tail & tx.desc_id_mask;
             uint32_t stat = (buffer.len << DMA_BUFLENGTH_SHIFT) | (0x3F << DMA_TX_QTAG_SHIFT) | DMA_TX_APPEND_CRC | DMA_TX_DO_CSUM | DMA_SOP | DMA_EOP;
             update_ring_slot(&tx, idx, buffer.io_or_offset, stat);
-            sddf_dprintf("tx addr: 0x%lx, len: 0x%x\n", buffer.io_or_offset, buffer.len);
 
             tx.tail++;
             ring_tx->prod_index = tx.tail & tx.index_mask;
@@ -242,9 +241,7 @@ static void handle_irq(void)
     while (irq_status) {
         if (irq_status & GENET_IRQ_TXDMA_DONE) {
             tx_return();
-            sddf_dprintf("free: head: 0x%x, cons: 0x%x, prod: 0x%x\n", tx.head, ring_tx->cons_index, ring_tx->prod_index);
             tx_provide();
-            sddf_dprintf("xmit: cons: 0x%x, prod: 0x%x\n", ring_tx->cons_index, ring_tx->prod_index);
         }
         if (irq_status & GENET_IRQ_RXDMA_DONE) {
             rx_return();
@@ -408,7 +405,6 @@ static void eth_setup(void)
     eth->tbuf_ctrl |= TBUF_64B_EN;
     /* eth->tbuf_ctrl |= TBUF_CTRL_CHKSUM_EN; */
     // No timeout for Tx Coalescing but IRQs generated after mbuf_done_thresh or empty buffer
-    sddf_dprintf("tx ring init\n");
 
     // ========== Enable DMA ==========
     uint32_t dma_ctrl = (1 << (DEFAULT_Q + DMA_RING_BUF_EN_SHIFT)) | DMA_EN;
@@ -547,9 +543,7 @@ void init(void)
     rpi4_set_cpu_frequency(1000000000);
     rpi4_get_cpu_frequency();
 
-    sddf_dprintf("eth ready\n");
     tx_provide();
-    sddf_dprintf("rx.cons_index: 0x%x, rx.prod_index: 0x%x\n", ring_rx->cons_index, ring_rx->prod_index);
 }
 
 void notified(sddf_channel ch)

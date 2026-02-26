@@ -372,13 +372,9 @@ static uintptr_t bcmgenet_add_chksum(uintptr_t frame, struct pbuf *p)
 {
     eth_hdr_t *ethhdr = (eth_hdr_t *)p->payload;
     uint16_t eth_type = htons(ethhdr->ethtype);
-    sddf_dprintf("eth->type: 0x%x\n", ethhdr->ethtype);
-    sddf_dprintf("htons: 0x%x\n", htons(ethhdr->ethtype));
 
     if (eth_type == 0x800) {
         ipv4_hdr_t *iphdr = (ipv4_hdr_t *)((void *)p->payload + IPV4_HDR_OFFSET);
-        sddf_dprintf("IPV4_HDR_OFFSET: 0x%x\n", IPV4_HDR_OFFSET);
-        sddf_dprintf("protocol: 0x%x\n", iphdr->protocol);
         if (iphdr->protocol == 17) {
             uint8_t *pseudo_header = (uint8_t *)((void *)p->payload + 0x1a);
             uint32_t sum = 0;
@@ -424,26 +420,14 @@ static uintptr_t bcmgenet_add_chksum(uintptr_t frame, struct pbuf *p)
             uint8_t *tcp_csum = (uint8_t *)((void *)p->payload + 0x32);
             tcp_csum[0] = (sum >> 8) & 0xff;
             tcp_csum[1] = sum & 0xff;
-            sddf_dprintf("sum: 0x%x\n", sum);
 
             struct bcmgenet_tsb *tsb = (struct bcmgneet_tsb *)frame;
-            tsb->length_status = 0;
             tsb->tx_csum_info = ((0x22) << 16) | (0x32) | 0x80000000 | 0x8000;
         } else {
-            uint8_t *buffer = (uint8_t *)p->payload;
-            for (int i = 0; i < p->len; i++) {
-                sddf_dprintf("%02x ", buffer[i]);
-                if (i % 16 == 0) {
-                    sddf_dprintf("\n");
-                }
-            }
-            sddf_dprintf("\n");
         }
     } else if (eth_type == 0x806) {
         struct bcmgenet_tsb *tsb = (struct bcmgneet_tsb *)frame;
-        tsb->length_status = 0x2a << 16;
-        tsb->tx_csum_info = 0;
-        sddf_dprintf("p->len: 0x%x\n", p->len);
+        tsb->tx_csum_info = ((0x3c) << 16) | (0x3c);
     }
     return 64;
 }
