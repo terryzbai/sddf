@@ -386,7 +386,6 @@ static void eth_setup(void)
     ring_rx->xon_xoff_thresh = (NUM_DESCS >> 4) | (5 << 16);
     eth->dma_rx.ring_cfg = BIT(DEFAULT_Q);
     eth->rbuf_ctrl |= RBUF_64B_EN;
-    /* eth->rbuf_ctrl |= RBUF_CTRL_CHKSUM_EN; */
     // Set timeout to DIV_ROUND_UP(us * 1000, 8192)
     eth->dma_rx.ring16_timeout = (eth->dma_rx.ring16_timeout & ~DMA_TIMEOUT_MASK) | 0xFF;
 
@@ -403,7 +402,6 @@ static void eth_setup(void)
     ring_tx->buf_size = (NUM_DESCS << 16) | RX_BUF_LENGTH;
     eth->dma_tx.ring_cfg = BIT(DEFAULT_Q);
     eth->tbuf_ctrl |= TBUF_64B_EN;
-    /* eth->tbuf_ctrl |= TBUF_CTRL_CHKSUM_EN; */
     // No timeout for Tx Coalescing but IRQs generated after mbuf_done_thresh or empty buffer
 
     // ========== Enable DMA ==========

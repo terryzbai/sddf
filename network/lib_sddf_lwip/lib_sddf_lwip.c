@@ -264,7 +264,7 @@ static void interface_free_buffer(struct pbuf *p)
     SYS_ARCH_DECL_PROTECT(old_level);
     pbuf_custom_offset_t *custom_pbuf_offset = (pbuf_custom_offset_t *)p;
     SYS_ARCH_PROTECT(old_level);
-    net_buff_desc_t buffer = { custom_pbuf_offset->offset, 0 };
+    net_buff_desc_t buffer = { custom_pbuf_offset->offset - PBUF_LINK_ENCAPSULATION_HLEN, 0 };
     int err = net_enqueue_free(&(sddf_state.rx_queue), buffer);
     assert(!err);
     sddf_state.notify_rx = true;
