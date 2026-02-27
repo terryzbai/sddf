@@ -289,6 +289,12 @@ def generate(
         pci_config_data_port = SystemDescription.IoPort(0xCFC, 4, 2)
         ethernet_driver.add_ioport(pci_config_data_port)
 
+    notif_nums = SystemDescription.MemoryRegion(
+        sdf, "notif_nums", 0x1000
+    )
+    ethernet_driver.add_map(SystemDescription.Map(notif_nums, 0x4000_0000, "rw", cached=False))
+    sdf.add_mr(notif_nums);
+
     net_virt_tx = ProtectionDomain(
         "net_virt_tx",
         "network_virt_tx.elf",
@@ -330,7 +336,8 @@ def generate(
     serial_system.add_client(client0)
     serial_system.add_client(client1)
     serial_system.add_client(ethernet_driver)
-    # serial_system.add_client(net_virt_tx)
+    serial_system.add_client(net_virt_rx)
+    serial_system.add_client(net_virt_tx)
     timer_system.add_client(client0)
     timer_system.add_client(client1)
     timer_system.add_client(ethernet_driver)
@@ -387,6 +394,9 @@ def generate(
             f"bench{core}", core_objs[i]["bench_elf"], priority=254, cpu=core
         )
         sdf.add_pd(core_objs[i]["bench_pd"])
+
+        # TODO: remove this
+        core_objs[i]["bench_pd"].add_map(SystemDescription.Map(notif_nums, 0x4000_0000, "rw", cached=False))
 
         # Benchmark PD requires serial output
         serial_system.add_client(core_objs[i]["bench_pd"])

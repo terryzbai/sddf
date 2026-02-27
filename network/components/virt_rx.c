@@ -18,6 +18,10 @@
  * any particular client. */
 #define BROADCAST_ID (-2)
 
+#include <sddf/serial/queue.h> // TODO: remove
+#include <sddf/serial/config.h>
+serial_queue_handle_t serial_tx_queue_handle;
+__attribute__((__section__(".serial_client_config"))) serial_client_config_t serial_config;
 __attribute__((__section__(".net_virt_rx_config"))) net_virt_rx_config_t config;
 
 /* In order to handle broadcast packets where the same buffer is given to multiple clients
@@ -88,7 +92,6 @@ void rx_return(void)
             // [1]: https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Instructions/DC-IVAC--Data-or-unified-Cache-line-Invalidate-by-VA-to-PoC
             cache_clean_and_invalidate(buffer_vaddr, buffer_vaddr + buffer.len);
 
-            /* sddf_dprintf("buffer.io_or_offset: 0x%x\n", buffer.io_or_offset); */
             // TODO: add a macro for this
             int client = get_mac_addr_match((struct ethernet_header *) (buffer_vaddr + 64));
             if (client == BROADCAST_ID) {
@@ -187,13 +190,24 @@ void rx_provide(void)
 
 void notified(sddf_channel ch)
 {
+    /* sddf_dprintf("rx virt start\n"); */
     rx_return();
     rx_provide();
+    /* sddf_dprintf("rx active: %d, free: %d\n", */
+    /*              state.rx_queue_clients[0].active->tail - state.rx_queue_clients[0].active->head, */
+    /*              state.rx_queue_clients[0].free->tail - state.rx_queue_clients[0].free->head); */
+    /* sddf_dprintf("drv rx active: %d, free: %d\n", */
+    /*              state.rx_queue_drv.active->tail - state.rx_queue_drv.active->head, */
+    /*              state.rx_queue_drv.free->tail - state.rx_queue_drv.free->head); */
 }
 
 void init(void)
 {
     assert(net_config_check_magic(&config));
+    serial_queue_init(&serial_tx_queue_handle, serial_config.tx.queue.vaddr, serial_config.tx.data.size,
+                      serial_config.tx.data.vaddr);
+    serial_putchar_init(serial_config.tx.id, &serial_tx_queue_handle);
+
 
     buffer_refs = config.buffer_metadata.vaddr;
 

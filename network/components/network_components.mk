@@ -42,6 +42,9 @@ network/components/network_copy.o: ${SDDF}/network/components/copy.c
 network/components/network_arp.o: ${SDDF}/network/components/arp.c
 	${CC} ${CFLAGS} -c -o $@ $<
 
+network_virt_%.elf: network/components/network_virt_%.o libsddf_util.a
+	${LD} ${LDFLAGS} -o $@ $^ ${LIBS}
+
 %.elf: network/components/%.o
 	${LD} ${LDFLAGS} -o $@ $< ${LIBS}
 

@@ -193,8 +193,8 @@ struct genet_dma {
     uint32_t ctrl;                                        // 0x1044
     uint8_t unused1[4];                                   // 0x1048
     uint32_t burst_size;                                  // 0x104C
-    uint8_t unused3[112];                                 // 0x1050-0x10C0
-    uint32_t ring16_timeout;                              // 0x10C0
+    uint8_t unused3[92];                                  // 0x1050-0x10AC
+    uint32_t ring16_timeout;                              // 0x10AC
 };
 
 struct genet_regs {
@@ -237,8 +237,8 @@ struct genet_regs {
     uint8_t unused1[56];             // 0xE18-0xE50
     uint32_t umac_mdf_ctrl;          // 0xE50
     uint8_t unused2[4524];           // 0xE54-0x2000
-    struct genet_dma dma_rx;         // 0x2000-0x30C4
-    uint8_t unused3[3900];           // 0x30C4-0x4000
+    struct genet_dma dma_rx;         // 0x2000-0x30B0
+    uint8_t unused3[3920];           // 0x30B0-0x4000
     struct genet_dma dma_tx;         // 0x4000
 };
 

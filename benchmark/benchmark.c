@@ -31,6 +31,8 @@ typedef struct {
     int value;
 } sel4bench_event_t;
 
+uint32_t *notif_nums = (uint32_t *)0x40000000;
+
 sel4bench_event_t event_table[] = {
     {"CACHE_L1I_MISS", "L1 i-cache misses", SEL4BENCH_EVENT_CACHE_L1I_MISS },
     {"CACHE_L1D_MISS", "L1 d-cache misses", SEL4BENCH_EVENT_CACHE_L1D_MISS },
@@ -164,6 +166,10 @@ static void benchmark_start(void)
     return;
 #endif
 
+    for (int i = 0; i < 7; i++) {
+        notif_nums[i] = 0;
+    }
+
 #if ENABLE_PMU_EVENTS
     sel4bench_reset_counters();
     THREAD_MEMORY_RELEASE();
@@ -198,6 +204,10 @@ static void benchmark_stop(void)
 #if ENABLE_PMU_EVENTS
     sel4bench_get_counters(benchmark_bf, &counter_values[0]);
     sel4bench_stop_counters(benchmark_bf);
+    sddf_printf("notif: {\n");
+    for (int i = 0; i < 7; i++) {
+        sddf_printf("%d: %d\n", i, notif_nums[i]);
+    }
 
     sddf_printf("{CORE %u: \n", benchmark_config.core);
     for (int i = 0; i < num_benchmarking_events; i++) {

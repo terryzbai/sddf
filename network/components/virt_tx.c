@@ -10,6 +10,11 @@
 #include <sddf/util/util.h>
 #include <sddf/util/printf.h>
 
+#include <sddf/serial/queue.h> // TODO: remove
+#include <sddf/serial/config.h>
+serial_queue_handle_t serial_tx_queue_handle;
+__attribute__((__section__(".serial_client_config"))) serial_client_config_t serial_config;
+
 __attribute__((__section__(".net_virt_tx_config"))) net_virt_tx_config_t config;
 
 typedef struct state {
@@ -73,6 +78,7 @@ void tx_provide(void)
 
     if (enqueued && net_require_signal_active(&state.tx_queue_drv)) {
         net_cancel_signal_active(&state.tx_queue_drv);
+        /* sddf_dprintf("notify drv\n"); */
         sddf_deferred_notify(config.driver.id);
     }
 }
@@ -89,6 +95,7 @@ void tx_return(void)
 
             int client = extract_offset(&buffer.io_or_offset);
             assert(client >= 0);
+            sddf_dprintf("c %d i %d\n", client, buffer.io_or_offset /  NET_BUFFER_SIZE);
 
             err = net_enqueue_free(&state.tx_queue_clients[client], buffer);
             assert(!err);
@@ -116,10 +123,20 @@ void notified(sddf_channel ch)
 {
     tx_return();
     tx_provide();
+    /* sddf_dprintf("tx active: %d, free: %d\n", */
+    /*              state.tx_queue_clients[0].active->tail - state.tx_queue_clients[0].active->head, */
+    /*              state.tx_queue_clients[0].free->tail - state.tx_queue_clients[0].free->head); */
+    /* sddf_dprintf("drv tx active: %d, free: %d\n", */
+    /*              state.tx_queue_drv.active->tail - state.tx_queue_drv.active->head, */
+    /*              state.tx_queue_drv.free->tail - state.tx_queue_drv.free->head); */
 }
 
 void init(void)
 {
+    serial_queue_init(&serial_tx_queue_handle, serial_config.tx.queue.vaddr, serial_config.tx.data.size,
+                      serial_config.tx.data.vaddr);
+    serial_putchar_init(serial_config.tx.id, &serial_tx_queue_handle);
+
     assert(net_config_check_magic(&config));
 
     /* Set up driver queues */

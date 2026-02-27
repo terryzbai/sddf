@@ -107,7 +107,8 @@ endif
 	$(OBJCOPY) --update-section .net_client_config=net_client_client0.data echo0.elf
 	$(OBJCOPY) --update-section .serial_client_config=serial_client_client0.data echo0.elf
 	$(OBJCOPY) --update-section .serial_client_config=serial_client_ethernet_driver.data eth_driver.elf
-	# $(OBJCOPY) --update-section .serial_client_config=serial_client_net_virt_tx.data network_virt_tx.elf
+	$(OBJCOPY) --update-section .serial_client_config=serial_client_net_virt_tx.data network_virt_tx.elf
+	$(OBJCOPY) --update-section .serial_client_config=serial_client_net_virt_rx.data network_virt_rx.elf
 	$(OBJCOPY) --update-section .timer_client_config=timer_client_client1.data echo1.elf
 	$(OBJCOPY) --update-section .net_client_config=net_client_client1.data echo1.elf
 	$(OBJCOPY) --update-section .serial_client_config=serial_client_client1.data echo1.elf

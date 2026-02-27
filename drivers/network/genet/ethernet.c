@@ -43,6 +43,8 @@ volatile uint32_t *mbox;
 volatile struct genet_dma_ring_rx *ring_rx;
 volatile struct genet_dma_ring_tx *ring_tx;
 
+uint32_t *notif_nums = (uint32_t *)0x40000000;
+
 /* HW ring buffer data type */
 typedef struct {
     uint32_t tail; /* index to insert at */
@@ -133,6 +135,7 @@ static void rx_provide(void)
             update_ring_slot(&rx, idx, buffer.io_or_offset, stat);
             rx.tail++;
             ring_rx->cons_index = (rx.tail - NUM_DESCS) & rx.index_mask; /* Update cons_index in device regs */
+            /* ring_rx->cons_index = ((ring_rx->cons_index + 1) & rx.index_mask); */
 
         }
 
@@ -156,15 +159,16 @@ static void rx_return(void)
     bool packets_transferred = false;
 
     while (!hw_ring_empty(&rx)) {
-        if ((rx.head & rx.desc_id_mask) == (ring_rx->prod_index & rx.desc_id_mask)) {
+        if ((rx.head & rx.index_mask) == (ring_rx->prod_index & rx.index_mask)) {
             break;
         }
         uint32_t idx = rx.head & rx.desc_id_mask;
         volatile struct genet_dma_desc *d = &(rx.descr[idx]);
 
+        THREAD_MEMORY_ACQUIRE();
+
         uint64_t addr = ((uint64_t)(d->addr_hi) << 32) | d->addr_lo;
         net_buff_desc_t buffer = { addr, d->status >> DMA_BUFLEN_SHIFT };
-        THREAD_MEMORY_ACQUIRE();
         int err = net_enqueue_active(&rx_queue, buffer);
         assert(!err);
 
@@ -210,7 +214,7 @@ static void tx_return(void)
     bool enqueued = false;
     while (!hw_ring_empty(&tx)) {
         /* Ensure that this buffer has been consumed by the device */
-        if ((tx.head & tx.desc_id_mask) == (ring_tx->cons_index & tx.desc_id_mask)) {
+        if ((tx.head & tx.index_mask) == (ring_tx->cons_index & tx.index_mask)) {
             break;
         }
 
@@ -242,10 +246,12 @@ static void handle_irq(void)
         if (irq_status & GENET_IRQ_TXDMA_DONE) {
             tx_return();
             tx_provide();
+            notif_nums[5] += 1;
         }
         if (irq_status & GENET_IRQ_RXDMA_DONE) {
             rx_return();
             rx_provide();
+            notif_nums[6] += 1;
         }
         irq_status = eth->intrl2_cpu_stat & ~(eth->intrl2_cpu_stat_mask);
         eth->intrl2_cpu_clear = irq_status;
@@ -382,12 +388,13 @@ static void eth_setup(void)
     ring_rx->prod_index = 0;
     ring_rx->cons_index = 0;
     ring_rx->buf_size = (NUM_DESCS << 16) | RX_BUF_LENGTH;
-    ring_rx->mbuf_done_thresh = 1;
+    ring_rx->mbuf_done_thresh = 0x1;
     ring_rx->xon_xoff_thresh = (NUM_DESCS >> 4) | (5 << 16);
     eth->dma_rx.ring_cfg = BIT(DEFAULT_Q);
     eth->rbuf_ctrl |= RBUF_64B_EN;
-    // Set timeout to DIV_ROUND_UP(us * 1000, 8192)
-    eth->dma_rx.ring16_timeout = (eth->dma_rx.ring16_timeout & ~DMA_TIMEOUT_MASK) | 0xFF;
+    // Set timeout to DIV_ROUND_UP(us * 1000, 8192), 0xFF is just a random number here.
+    sddf_dprintf("rx timeout: 0x%x\n", eth->dma_rx.ring16_timeout & DMA_TIMEOUT_MASK);
+    eth->dma_rx.ring16_timeout = (eth->dma_rx.ring16_timeout & ~DMA_TIMEOUT_MASK) | 0x0;
 
     // ========== Tx Ring Init ==========
     ring_tx = (struct genet_dma_ring_tx *)&eth->dma_tx.ring;
@@ -485,7 +492,6 @@ void rpi4_get_cpu_frequency()
     }
 
     uint32_t *cpu_freq = (uint32_t *)&mbox[6];
-    sddf_dprintf("cpu_freq: %u\n", *cpu_freq);
 }
 
 void rpi4_set_cpu_frequency(uint32_t freq)
@@ -546,8 +552,13 @@ void init(void)
 
 void notified(sddf_channel ch)
 {
+    /* sddf_dprintf("notif %d\n", ch); */
+    notif_nums[ch] += 1;
+
     if (ch == device_resources.irqs[0].id) {
         handle_irq();
+        sddf_dprintf("c: 0x%x, p: 0x%x, h: 0x%x, t: 0x%x\n", ring_tx->cons_index, ring_tx->prod_index, tx.head, tx.tail);
+        sddf_dprintf("rx c: 0x%x, p: 0x%x, h: 0x%x, t: 0x%x\n", ring_rx->cons_index, ring_rx->prod_index, rx.head, rx.tail);
 
         sddf_deferred_irq_ack(ch);
     } else if (ch == config.virt_rx.id) {
