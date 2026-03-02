@@ -130,9 +130,8 @@ static void rx_provide(void)
             int err = net_dequeue_free(&rx_queue, &buffer);
             assert(!err);
 
-            uint32_t idx = rx.tail % NUM_DESCS;
-            uint32_t stat = (0 << DMA_BUFLEN_SHIFT);
-            update_ring_slot(&rx, idx, buffer.io_or_offset, stat);
+            uint32_t idx = rx.tail & rx.desc_id_mask;
+            update_ring_slot(&rx, idx, buffer.io_or_offset, 0);
             rx.tail++;
             ring_rx->cons_index = (rx.tail - NUM_DESCS) & rx.index_mask; /* Update cons_index in device regs */
             /* ring_rx->cons_index = ((ring_rx->cons_index + 1) & rx.index_mask); */
@@ -240,8 +239,8 @@ static void tx_return(void)
 
 static void handle_irq(void)
 {
-    uint32_t irq_status = eth->intrl2_cpu_stat & ~(eth->intrl2_cpu_stat_mask);
-    eth->intrl2_cpu_clear = irq_status;
+    uint32_t irq_status = eth->intrl2_0_cpu_stat & ~(eth->intrl2_0_cpu_stat_mask);
+    eth->intrl2_0_cpu_clear = irq_status;
     while (irq_status) {
         if (irq_status & GENET_IRQ_TXDMA_DONE) {
             tx_return();
@@ -253,8 +252,8 @@ static void handle_irq(void)
             rx_provide();
             notif_nums[6] += 1;
         }
-        irq_status = eth->intrl2_cpu_stat & ~(eth->intrl2_cpu_stat_mask);
-        eth->intrl2_cpu_clear = irq_status;
+        irq_status = eth->intrl2_0_cpu_stat & ~(eth->intrl2_0_cpu_stat_mask);
+        eth->intrl2_0_cpu_clear = irq_status;
     }
 }
 
@@ -393,7 +392,6 @@ static void eth_setup(void)
     eth->dma_rx.ring_cfg = BIT(DEFAULT_Q);
     eth->rbuf_ctrl |= RBUF_64B_EN;
     // Set timeout to DIV_ROUND_UP(us * 1000, 8192), 0xFF is just a random number here.
-    sddf_dprintf("rx timeout: 0x%x\n", eth->dma_rx.ring16_timeout & DMA_TIMEOUT_MASK);
     eth->dma_rx.ring16_timeout = (eth->dma_rx.ring16_timeout & ~DMA_TIMEOUT_MASK) | 0x0;
 
     // ========== Tx Ring Init ==========
@@ -452,12 +450,11 @@ static void eth_setup(void)
     eth->umac_cmd |= (CMD_TX_EN | CMD_RX_EN);
 
     // ========== Clear IRQ status ==========
-    uint32_t irq_status = eth->intrl2_cpu_stat & ~(eth->intrl2_cpu_stat_mask);
-    eth->intrl2_cpu_clear = irq_status;
-    irq_status = eth->intrl2_cpu_stat & ~(eth->intrl2_cpu_stat_mask);
+    uint32_t irq_status = eth->intrl2_0_cpu_stat & ~(eth->intrl2_1_cpu_stat_mask);
+    eth->intrl2_0_cpu_clear = irq_status;
 
     // ========== Enable IRQ ==========
-    eth->intrl2_cpu_clear_mask = GENET_IRQ_TXDMA_DONE | GENET_IRQ_RXDMA_DONE;
+    eth->intrl2_0_cpu_clear_mask = GENET_IRQ_TXDMA_DONE | GENET_IRQ_RXDMA_DONE;
 }
 
 void rpi4_get_cpu_frequency()
@@ -541,11 +538,11 @@ void init(void)
     net_queue_init(&tx_queue, config.virt_tx.free_queue.vaddr, config.virt_tx.active_queue.vaddr,
                    config.virt_tx.num_buffers);
 
-    eth_setup();
-
     /* Remove this if we  */
     rpi4_set_cpu_frequency(1000000000);
     rpi4_get_cpu_frequency();
+
+    eth_setup();
 
     tx_provide();
 }
@@ -553,12 +550,12 @@ void init(void)
 void notified(sddf_channel ch)
 {
     /* sddf_dprintf("notif %d\n", ch); */
+    /* uint32_t irq_status = eth->intrl2_1_cpu_stat & ~(eth->intrl2_1_cpu_stat_mask); */
+    /* sddf_dprintf("irq status: 0x%x\n", irq_status); */
     notif_nums[ch] += 1;
 
     if (ch == device_resources.irqs[0].id) {
         handle_irq();
-        sddf_dprintf("c: 0x%x, p: 0x%x, h: 0x%x, t: 0x%x\n", ring_tx->cons_index, ring_tx->prod_index, tx.head, tx.tail);
-        sddf_dprintf("rx c: 0x%x, p: 0x%x, h: 0x%x, t: 0x%x\n", ring_rx->cons_index, ring_rx->prod_index, rx.head, rx.tail);
 
         sddf_deferred_irq_ack(ch);
     } else if (ch == config.virt_rx.id) {

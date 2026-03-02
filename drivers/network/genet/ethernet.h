@@ -198,48 +198,55 @@ struct genet_dma {
 };
 
 struct genet_regs {
-    uint32_t sys_rev_ctrl;           // 0x00
-    uint32_t sys_port_ctrl;          // 0x04
-    uint32_t sys_rbuf_flush_ctrl;    // 0x08
-    uint32_t sys_tbuf_flush_ctrl;    // 0x0C
-    uint8_t sys_unused[112];         // 0x10-0x80
-    uint32_t ext_pwr_mgmt;           // 0x80
-    uint8_t ext_unused1[8];          // 0x84-0x8C
-    uint32_t ext_rgmii_oob_ctrl;     // 0x8C
-    uint8_t ext_unused2[12];         // 0x90-0x9C
-    uint32_t ext_gphy_ctrl;          // 0x9C
-    uint8_t ext_unused3[352];        // 0xA0-0x200
-    uint32_t intrl2_cpu_stat;        // 0x200
-    uint32_t intrl2_unused1;         // 0x204-0x208
-    uint32_t intrl2_cpu_clear;       // 0x208
-    uint32_t intrl2_cpu_stat_mask;   // 0x20C
-    uint32_t intrl2_cpu_set_mask;    // 0x210
-    uint32_t intrl2_cpu_clear_mask;  // 0x214
-    uint8_t intrl2_unused2[232];     // 0x218-0x300
-    uint32_t rbuf_ctrl;              // 0x300
-    uint8_t rbuf_unused1[176];       // 0x304-0x3B4
-    uint32_t rbuf_tbuf_size_ctrl;    // 0x3B4
-    uint8_t rbuf_unused2[584];       // 0x3B8-0x600
-    uint32_t tbuf_ctrl;              // 0x600
-    uint32_t tbuf_ck_ctrl;           // 0x604
-    uint8_t tbuf_unused[504];        // 0x608-0x800
-    uint8_t umac_unused1[8];         // 0x800-0x808
-    uint32_t umac_cmd;               // 0x808
-    uint32_t umac_mac0;              // 0x80C
-    uint32_t umac_mac1;              // 0x810
-    uint32_t umac_max_frame_len;     // 0x814
-    uint8_t umac_unused2[796];       // 0x818-0xB34
-    uint32_t umac_tx_flush;          // 0xB34
-    uint8_t umac_unused3[584];       // 0xB38-0xD80
-    uint32_t umac_mib_ctrl;          // 0xD80
-    uint8_t umac_unused4[144];       // 0xD84-0xE14
-    uint32_t umac_mdio_cmd;          // 0xE14
-    uint8_t unused1[56];             // 0xE18-0xE50
-    uint32_t umac_mdf_ctrl;          // 0xE50
-    uint8_t unused2[4524];           // 0xE54-0x2000
-    struct genet_dma dma_rx;         // 0x2000-0x30B0
-    uint8_t unused3[3920];           // 0x30B0-0x4000
-    struct genet_dma dma_tx;         // 0x4000
+    uint32_t sys_rev_ctrl;              // 0x00
+    uint32_t sys_port_ctrl;             // 0x04
+    uint32_t sys_rbuf_flush_ctrl;       // 0x08
+    uint32_t sys_tbuf_flush_ctrl;       // 0x0C
+    uint8_t sys_unused[112];            // 0x10-0x80
+    uint32_t ext_pwr_mgmt;              // 0x80
+    uint8_t ext_unused1[8];             // 0x84-0x8C
+    uint32_t ext_rgmii_oob_ctrl;        // 0x8C
+    uint8_t ext_unused2[12];            // 0x90-0x9C
+    uint32_t ext_gphy_ctrl;             // 0x9C
+    uint8_t ext_unused3[352];           // 0xA0-0x200
+    uint32_t intrl2_0_cpu_stat;         // 0x200
+    uint32_t intrl2_0_cpu_set;          // 0x204
+    uint32_t intrl2_0_cpu_clear;        // 0x208
+    uint32_t intrl2_0_cpu_stat_mask;    // 0x20C
+    uint32_t intrl2_0_cpu_set_mask;     // 0x210
+    uint32_t intrl2_0_cpu_clear_mask;   // 0x214
+    uint8_t intrl2_0_unused2[40];       // 0x218-0x240
+    uint32_t intrl2_1_cpu_stat;         // 0x240
+    uint32_t intrl2_1_cpu_set;          // 0x244
+    uint32_t intrl2_1_cpu_clear;        // 0x248
+    uint32_t intrl2_1_cpu_stat_mask;    // 0x24C
+    uint32_t intrl2_1_cpu_set_mask;     // 0x250
+    uint32_t intrl2_1_cpu_clear_mask;   // 0x254
+    uint8_t intrl2_unused2[168];        // 0x258-0x300
+    uint32_t rbuf_ctrl;                 // 0x300
+    uint8_t rbuf_unused1[176];          // 0x304-0x3B4
+    uint32_t rbuf_tbuf_size_ctrl;       // 0x3B4
+    uint8_t rbuf_unused2[584];          // 0x3B8-0x600
+    uint32_t tbuf_ctrl;                 // 0x600
+    uint32_t tbuf_ck_ctrl;              // 0x604
+    uint8_t tbuf_unused[504];           // 0x608-0x800
+    uint8_t umac_unused1[8];            // 0x800-0x808
+    uint32_t umac_cmd;                  // 0x808
+    uint32_t umac_mac0;                 // 0x80C
+    uint32_t umac_mac1;                 // 0x810
+    uint32_t umac_max_frame_len;        // 0x814
+    uint8_t umac_unused2[796];          // 0x818-0xB34
+    uint32_t umac_tx_flush;             // 0xB34
+    uint8_t umac_unused3[584];          // 0xB38-0xD80
+    uint32_t umac_mib_ctrl;             // 0xD80
+    uint8_t umac_unused4[144];          // 0xD84-0xE14
+    uint32_t umac_mdio_cmd;             // 0xE14
+    uint8_t unused1[56];                // 0xE18-0xE50
+    uint32_t umac_mdf_ctrl;             // 0xE50
+    uint8_t unused2[4524];              // 0xE54-0x2000
+    struct genet_dma dma_rx;            // 0x2000-0x30B0
+    uint8_t unused3[3920];              // 0x30B0-0x4000
+    struct genet_dma dma_tx;            // 0x4000
 };
 
 #define MBOX_REQUEST    0
