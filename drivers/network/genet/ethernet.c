@@ -43,8 +43,6 @@ volatile uint32_t *mbox;
 volatile struct genet_dma_ring_rx *ring_rx;
 volatile struct genet_dma_ring_tx *ring_tx;
 
-uint32_t *notif_nums = (uint32_t *)0x40000000;
-
 /* HW ring buffer data type */
 typedef struct {
     uint32_t tail; /* index to insert at */
@@ -61,7 +59,6 @@ hw_ring_t tx;
 net_queue_handle_t rx_queue;
 net_queue_handle_t tx_queue;
 
-uint32_t index_flag = 0;
 
 static inline bool hw_ring_full(hw_ring_t *ring)
 {
@@ -113,7 +110,6 @@ static uint16_t bcmgenet_mdio_read(uint8_t reg_addr)
     uint32_t reg = eth->umac_mdio_cmd | MDIO_START_BUSY;
     eth->umac_mdio_cmd = reg;
 
-    // TODO: proper way
     while (eth->umac_mdio_cmd & MDIO_START_BUSY) {
         sleep_us(1);
     };
@@ -133,10 +129,9 @@ static void rx_provide(void)
             uint32_t idx = rx.tail & rx.desc_id_mask;
             update_ring_slot(&rx, idx, buffer.io_or_offset, 0);
             rx.tail++;
-            ring_rx->cons_index = (rx.tail - NUM_DESCS) & rx.index_mask; /* Update cons_index in device regs */
             /* ring_rx->cons_index = ((ring_rx->cons_index + 1) & rx.index_mask); */
-
         }
+        ring_rx->cons_index = (rx.tail - NUM_DESCS) & rx.index_mask; /* Update cons_index in device regs */
 
         /* Only request a notification from virtualiser if HW ring not full */
         if (!hw_ring_full(&rx)) {
@@ -156,9 +151,9 @@ static void rx_provide(void)
 static void rx_return(void)
 {
     bool packets_transferred = false;
-
+    uint32_t prod_index = ring_rx->prod_index & rx.index_mask;
     while (!hw_ring_empty(&rx)) {
-        if ((rx.head & rx.index_mask) == (ring_rx->prod_index & rx.index_mask)) {
+        if ((rx.head & rx.index_mask) == prod_index) {
             break;
         }
         uint32_t idx = rx.head & rx.desc_id_mask;
@@ -195,8 +190,8 @@ static void tx_provide()
             update_ring_slot(&tx, idx, buffer.io_or_offset, stat);
 
             tx.tail++;
-            ring_tx->prod_index = tx.tail & tx.index_mask;
         }
+        ring_tx->prod_index = tx.tail & tx.index_mask;
 
         net_request_signal_active(&tx_queue);
         reprocess = false;
@@ -206,17 +201,17 @@ static void tx_provide()
           reprocess = true;
         }
     }
+
 }
 
 static void tx_return(void)
 {
     bool enqueued = false;
+    uint32_t cons_index = ring_tx->cons_index & tx.index_mask;
     while (!hw_ring_empty(&tx)) {
-        /* Ensure that this buffer has been consumed by the device */
-        if ((tx.head & tx.index_mask) == (ring_tx->cons_index & tx.index_mask)) {
+        if ((tx.head & tx.index_mask) == cons_index) {
             break;
         }
-
         uint32_t idx = tx.head & tx.desc_id_mask;
         volatile struct genet_dma_desc *d = &(tx.descr[idx]);
 
@@ -245,12 +240,10 @@ static void handle_irq(void)
         if (irq_status & GENET_IRQ_TXDMA_DONE) {
             tx_return();
             tx_provide();
-            notif_nums[5] += 1;
         }
         if (irq_status & GENET_IRQ_RXDMA_DONE) {
             rx_return();
             rx_provide();
-            notif_nums[6] += 1;
         }
         irq_status = eth->intrl2_0_cpu_stat & ~(eth->intrl2_0_cpu_stat_mask);
         eth->intrl2_0_cpu_clear = irq_status;
@@ -402,7 +395,7 @@ static void eth_setup(void)
     ring_tx->write_ptr = 0;
     ring_tx->prod_index = ring_tx->cons_index;
     ring_tx->end_addr = NUM_DESCS * DESC_SIZE / 4 - 1;
-    ring_tx->mbuf_done_thresh = 0x1;
+    ring_tx->mbuf_done_thresh = 0x80;
     ring_tx->flow_period = 0;
     ring_tx->buf_size = (NUM_DESCS << 16) | RX_BUF_LENGTH;
     eth->dma_tx.ring_cfg = BIT(DEFAULT_Q);
@@ -429,9 +422,8 @@ static void eth_setup(void)
     tx.desc_id_mask = NUM_DESCS - 1;
     tx.index_mask = 0xFFFF;
 
-    index_flag = ring_rx->prod_index;
-    rx.head = index_flag;
-    rx.tail = index_flag;
+    rx.head = ring_rx->prod_index;
+    rx.tail = rx.head;
     rx.capacity = NUM_DESCS;
     rx.desc_id_mask = NUM_DESCS - 1;
     rx.index_mask = 0xFFFF;
@@ -439,8 +431,8 @@ static void eth_setup(void)
 
     rx_provide();
 
-    ring_rx->cons_index = index_flag;
-    ring_rx->prod_index = index_flag;
+    ring_rx->cons_index = rx.head;
+    ring_rx->prod_index = rx.head;
 
     // enable promisc mode
     eth->umac_cmd = eth->umac_cmd | CMD_PROMISC;
@@ -549,11 +541,6 @@ void init(void)
 
 void notified(sddf_channel ch)
 {
-    /* sddf_dprintf("notif %d\n", ch); */
-    /* uint32_t irq_status = eth->intrl2_1_cpu_stat & ~(eth->intrl2_1_cpu_stat_mask); */
-    /* sddf_dprintf("irq status: 0x%x\n", irq_status); */
-    notif_nums[ch] += 1;
-
     if (ch == device_resources.irqs[0].id) {
         handle_irq();
 
